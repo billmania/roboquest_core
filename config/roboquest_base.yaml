@@ -1,0 +1,3 @@
+roboquest_base_node:
+  ros__parameters:
+    name: "roboquest_base_node"
