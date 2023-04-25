@@ -1,3 +1,7 @@
 roboquest_base_node:
   ros__parameters:
     name: "roboquest_base_node"
+    hat:
+      port: "/dev/ttyS0"
+      data_rate: 115200
+      comms_read_hz: 10
