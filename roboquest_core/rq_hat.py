@@ -1,9 +1,11 @@
 from enum import Enum
+from typing import Callable
 import serial
 import RPi.GPIO as GPIO
 
-ENABLE = GPIO.HIGH
-DISABLE = GPIO.LOW
+READ_EOL = b'\r\n'
+WRITE_EOL = b'\r'
+READ_TIMEOUT_SEC = 0.2
 
 
 class HAT_GPIO_PIN(Enum):
@@ -24,6 +26,8 @@ class HAT_SCREEN(Enum):
     CONNECTIONS = '3'
     MISC = '4'
     ABOUT = '5'
+
+    UNKNOWN = '0'
 
 
 class HAT_BUTTON(Enum):
@@ -58,17 +62,120 @@ class RQHAT(object):
         - connections
     """
 
-    def __init__(self, parameters: dict):
-        self.hat = serial.Serial
-        self._screen_page = 0
+    def __init__(self,
+                 port: str,
+                 data_rate: int,
+                 data_bits: int,
+                 parity: str,
+                 stop_bits: int,
+                 read_timeout_sec: float,
+                 serial_errors_cb: Callable = None):
+        self._serial_errors_cb = serial_errors_cb
+
+        self._hat = None
         self._controls_state = {
             'charger': 'UNKNOWN',
             'fet_1': 'UNKNOWN',
             'fet_2': 'UNKNOWN',
             'comms': 'UNKNOWN'
         }
-
         self._setup_gpio()
+        self._open_hat_serial(port,
+                              data_rate,
+                              data_bits,
+                              parity,
+                              stop_bits,
+                              read_timeout_sec)
+        self._screen_page = 0
+
+    def _open_hat_serial(self, port: str,
+                         data_rate: int,
+                         data_bits: int,
+                         parity: str,
+                         stop_bits: int,
+                         read_timeout_sec: float):
+        if self._hat:
+            try:
+                self._hat.close()
+            except serial.SerialException:
+                pass
+
+            self._hat = None
+
+        try:
+            self._hat = serial.Serial(port=port,
+                                      baudrate=data_rate,
+                                      bytesize=data_bits,
+                                      parity=parity,
+                                      stopbits=stop_bits,
+                                      timeout=read_timeout_sec)
+            self._hat.reset_input_buffer()
+            self._hat.reset_output_buffer()
+
+        except serial.SerialException:
+            self._hat = None
+
+    def _write_sentence(self, sentence: str) -> None:
+        """
+        Append the WRITE_EOL and then write the sentence.
+        """
+
+        if 0 < len(sentence):
+            bytes_to_write = bytearray(sentence + WRITE_EOL, 'ascii')
+            try:
+                bytes_written = self._hat.write(bytes_to_write)
+                if bytes_written != len(bytes_to_write):
+                    self._open_hat_serial()
+
+            except serial.SerialException:
+                self._open_hat_serial()
+
+        return None
+
+    def _read_sentence(self) -> str:
+        """
+        Read one sentence from the serial port or timeout. Return
+        the sentence after stripping the READ_EOL.
+
+        One second's worth of data from the HAT looks like
+        the following. Every line is terminated with \r\n:
+
+$$TELEM 12.39 0.13 0.05 1.67 1.68 1.69 1.70 0.00 1
+$$TELEM 12.37 0.12 0.09 1.67 1.68 1.69 1.70 0.00 1
+$$TELEM 12.38 0.12 0.05 1.68 1.69 1.70 1.70 0.00 1
+$$TELEM 12.39 0.12 0.05 1.67 1.69 1.70 1.70 0.00 1
+$$TELEM 12.38 0.12 0.05 1.67 1.69 1.69 1.70 0.00 1
+$$TELEM 12.37 0.23 0.01 1.68 1.69 1.70 1.71 0.00 1
+$$TELEM 12.39 0.18 0.05 1.68 1.69 1.70 1.71 0.00 1
+$$TELEM 12.37 0.16 -0.02 1.66 1.68 1.69 1.70 0.00 1
+$$TELEM 12.37 0.17 -0.02 1.66 1.67 1.68 1.70 0.00 1
+$$TELEM 12.38 0.17 0.05 1.67 1.69 1.69 1.69 0.00 1
+$$TELEM 12.37 0.16 0.05 1.66 1.67 1.68 1.69 0.00 1
+$$TELEM 12.38 0.17 0.01 1.65 1.66 1.68 1.69 0.00 1
+$$TELEM 12.38 0.17 0.01 1.65 1.66 1.67 1.69 0.00 1
+$$TELEM 12.39 0.20 -0.02 1.66 1.68 1.68 1.69 0.00 1
+$$TELEM 12.38 0.21 -0.06 1.67 1.68 1.69 1.70 0.00 1
+$$TELEM 12.37 0.21 0.01 1.66 1.68 1.68 1.70 0.00 1
+$$TELEM 12.39 0.20 -0.02 1.65 1.67 1.68 1.69 0.00 1
+$$TELEM 12.38 0.20 0.01 1.66 1.67 1.67 1.69 0.00 1
+$$TELEM 12.38 0.21 -0.02 1.66 1.68 1.68 1.70 0.00 1
+$$TELEM 12.37 0.20 -0.06 1.66 1.67 1.69 1.70 0.00 1
+$$SCREEN 1 0
+        """
+
+        try:
+            sentence = self._hat.read_until(
+                expected=READ_EOL)
+
+            if sentence:
+                return sentence[:-len(READ_EOL)].decode('ascii')
+            else:
+                self._hat.reset_input_buffer()
+
+        except serial.SerialException:
+            self._open_hat_serial()
+
+        return None
 
     def cleanup_gpio(self):
         if self._controls_state['charger'] == 'ENABLED':
@@ -86,7 +193,21 @@ class RQHAT(object):
 
         GPIO.cleanup()
 
+    def control_comms(self, enable: bool = False):
+        """
+        Used to enable and disable the flow of serial data from the HAT.
+        Disabling the communications causes the input buffer to be reset.
+        """
+
+        new_state = 'ENABLED' if enable else 'DISABLED'
+        if self._controls_state['comms'] != new_state:
+            new_pin_output = GPIO.HIGH if enable else GPIO.LOW
+            GPIO.output(HAT_GPIO_PIN.COMMS_ENABLE.value, new_pin_output)
+            if new_state == 'DISABLED':
+                self._hat.reset_input_buffer()
+
     def _setup_gpio(self):
+        GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
 
         GPIO.setup(HAT_GPIO_PIN.CHARGER_DISABLE.value, GPIO.OUT)
@@ -102,8 +223,8 @@ class RQHAT(object):
         self._controls_state['fet_2'] = 'DISABLED'
 
         GPIO.setup(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.OUT)
-        GPIO.output(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.HIGH)
-        self._controls_state['comms'] = 'ENABLED'
+        GPIO.output(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.LOW)
+        self._controls_state['comms'] = 'DISABLED'
 
         GPIO.setup(HAT_GPIO_PIN.CHARGER_DETECT.value, GPIO.IN)
 
@@ -118,15 +239,6 @@ class RQHAT(object):
         pass
 
     def _set_sleep_duration(self, sleep_secs: int = 0) -> None:
-        # TODO: Implement
-        pass
-
-    def read_next_line(self) -> str:
-        """
-        Read the next line of output from the HAT, which will be either
-        SCREEN or TELEM.
-        """
-
         # TODO: Implement
         pass
 
