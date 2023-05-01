@@ -1,9 +1,11 @@
-from typing import Callable
+from typing import List
 from rclpy.parameter import Parameter
 from rclpy import spin_once as ROSspin_once
 from rclpy import shutdown as ROSshutdown
+import diagnostic_msgs
 from roboquest_core.rq_node import RQNode
 from roboquest_core.rq_hat import RQHAT
+from rq_msgs.msg import Telemetry
 
 
 class RQManage(RQNode):
@@ -11,13 +13,20 @@ class RQManage(RQNode):
     The node which manages the RoboQuest application. It contains
     all of the logic specific to management and use of the
     RoboQuest HAT.
+
+    It requires rclpy.init() has already been called.
     """
 
     def __init__(self,
-                 node_name: str = 'RQManage',
-                 diags_cb: Callable = None):
-        super().__init__(node_name, diags_cb)
+                 node_name: str = 'RQManage'):
+        super().__init__(node_name)
         self._setup_parameters()
+
+        self._telem_sentences = 0
+        self._screen_sentences = 0
+        self._sentence_errors = 0
+
+        self._setup_ros_graph()
 
         self._timeout_sec = 1 / self._parameters['hat_comms_read_hz']
         self.hat = RQHAT(port=self._parameters['hat_port'],
@@ -27,6 +36,13 @@ class RQManage(RQNode):
                          stop_bits=self._parameters['hat_stop_bits'],
                          read_timeout_sec=self._timeout_sec,
                          serial_errors_cb=None)
+
+    def _setup_ros_graph(self):
+        """
+        Setup the publishers, subscribers, and services.
+        """
+
+        self._telemetry_pub = self.create_publisher(Telemetry, 'telemetry', 1)
 
     def _setup_parameters(self):
         parameter_declarations = [
@@ -53,13 +69,73 @@ class RQManage(RQNode):
             self.get_logger().info(f"Parameter {name}:"
                                    f" {self._parameters[name]}")
 
+    def _publish_telemetry(self, fields: List[str]) -> None:
+        telemetry_msg = Telemetry()
+
+        telemetry_msg.header.stamp = self.get_clock().now().to_msg()
+
+        telemetry_msg.battery_v = float(fields[1])
+        telemetry_msg.battery_ma = float(fields[2])
+        telemetry_msg.system_ma = float(fields[3])
+        telemetry_msg.adc0_v = float(fields[4])
+        telemetry_msg.adc1_v = float(fields[5])
+        telemetry_msg.adc2_v = float(fields[6])
+        telemetry_msg.adc3_v = float(fields[7])
+        telemetry_msg.adc4_v = float(fields[8])
+        telemetry_msg.charger_enabled = True if fields[9] == 1 else False
+
+        self._telemetry_pub.publish(telemetry_msg)
+
+    def _process_screen(self, fields: List[str]) -> None:
+        # TODO: Implement
+        pass
+
+    def _process_sentence(self, sentence: str):
+        """
+        Determine if it's a SCREEN or a TELEM sentence.
+        """
+
+        if sentence:
+            fields = sentence.split()
+
+            if fields[0] == '$$TELEM':
+                if len(fields) == 10:
+                    self._publish_telemetry(fields)
+                    self._telem_sentences += 1
+                    return
+
+            elif fields[0] == '$$SCREEN':
+                if len(fields) == 3:
+                    self.hat.control_comms(enable=False)
+                    self._process_screen(fields)
+                    self.hat.control_comms(enable=True)
+                    self._screen_sentences += 1
+                    return
+
+        self._sentence_errors += 1
+
+    def _diags_cb(self, statuses):
+        """
+        Called by the diagnostics_updater utility.
+        """
+
+        # TODO: Use something more informative for the Status
+        statuses.summary(
+            diagnostic_msgs.msg.DiagnosticStatus.OK,
+            'Telemetry')
+        statuses.add('telem_sentences', f"{self._telem_sentences}")
+        statuses.add('screen_sentences', f"{self._screen_sentences}")
+        statuses.add('sentence_errors', f"{self._sentence_errors}")
+
+        return statuses
+
     def main(self):
         """
         Setup the serial port and then read incoming sentences in a loop.
         """
 
         self.get_logger().info(f"{self._node_name} starting")
-        self.setup_diags()
+        self.setup_diags(diags_cb=self._diags_cb)
 
         self.get_logger().info(f"{self._node_name} spinning"
                                f" with timeout {self._timeout_sec}")
@@ -69,13 +145,8 @@ class RQManage(RQNode):
             ROSspin_once(node=self, timeout_sec=0)
             sentence = self.hat._read_sentence()
 
-            try:
-                if sentence:
-                    sentence.index('$$SCREEN')
-                    self.get_logger().info(f"Screen {sentence}")
-
-            except ValueError:
-                pass
+            if sentence:
+                self._process_sentence(sentence)
 
         self.get_logger().info(f"{self._node_name} stopping")
         self.destroy_node()

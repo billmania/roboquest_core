@@ -1,4 +1,3 @@
-from typing import Callable
 import rclpy
 from rclpy.node import Node
 import diagnostic_updater
@@ -11,22 +10,20 @@ class RQNode(Node):
     """
 
     def __init__(self,
-                 node_name: str,
-                 diags_cb: Callable = None):
+                 node_name: str):
         self._node_name = node_name
         super().__init__(self._node_name)
-        self._diags_cb = diags_cb
 
-    def setup_diags(self):
+    def setup_diags(self, diags_cb=None):
         """
         Define the diagnostics
         """
 
-        if self._diags_cb and callable(self._diags_cb):
+        if diags_cb and callable(diags_cb):
             self._diag_updater = diagnostic_updater.Updater(self)
             self._diag_updater.setHardwareID(self._node_name)
             self._diag_updater.add(f"{self._node_name}",
-                                   self._diags_cb)
+                                   diags_cb)
 
     def main(self):
         """
