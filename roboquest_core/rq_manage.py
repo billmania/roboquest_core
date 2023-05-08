@@ -5,6 +5,7 @@ from rclpy import shutdown as ROSshutdown
 import diagnostic_msgs
 from roboquest_core.rq_node import RQNode
 from roboquest_core.rq_hat import RQHAT
+from rq_msgs.srv import Control
 from rq_msgs.msg import Telemetry
 
 
@@ -37,12 +38,35 @@ class RQManage(RQNode):
                          read_timeout_sec=self._timeout_sec,
                          serial_errors_cb=None)
 
+    def _control_cb(self, request, response):
+        response.success = True
+
+        if request.set_charger != 'IGNORE':
+            set_charger_on = True if request.set_charger == 'ON' \
+                else False
+            self.hat.charger_control(set_charger_on)
+
+        if request.set_fet1 != 'IGNORE':
+            set_fet1_on = True if request.set_fet1 == 'ON' \
+                else False
+            self.hat.fet1_control(set_fet1_on)
+
+        if request.set_fet2 != 'IGNORE':
+            set_fet2_on = True if request.set_fet2 == 'ON' \
+                else False
+            self.hat.fet2_control(set_fet2_on)
+
+        return response
+
     def _setup_ros_graph(self):
         """
         Setup the publishers, subscribers, and services.
         """
 
         self._telemetry_pub = self.create_publisher(Telemetry, 'telemetry', 1)
+        self._charger_srv = self.create_service(Control,
+                                                'control_hat',
+                                                self._control_cb)
 
     def _setup_parameters(self):
         parameter_declarations = [
@@ -82,7 +106,8 @@ class RQManage(RQNode):
         telemetry_msg.adc2_v = float(fields[6])
         telemetry_msg.adc3_v = float(fields[7])
         telemetry_msg.adc4_v = float(fields[8])
-        telemetry_msg.charger_enabled = True if fields[9] == 1 else False
+        telemetry_msg.battery_charging, telemetry_msg.charger_has_power = \
+            self.hat.charger_state()
 
         self._telemetry_pub.publish(telemetry_msg)
 
@@ -99,7 +124,7 @@ class RQManage(RQNode):
             fields = sentence.split()
 
             if fields[0] == '$$TELEM':
-                if len(fields) == 10:
+                if len(fields) == 9:
                     self._publish_telemetry(fields)
                     self._telem_sentences += 1
                     return
@@ -112,6 +137,8 @@ class RQManage(RQNode):
                     self._screen_sentences += 1
                     return
 
+        self.get_logger().warning(f"Unusable sentence {sentence}",
+                                  throttle_duration_sec=60)
         self._sentence_errors += 1
 
     def _diags_cb(self, statuses):
@@ -141,6 +168,7 @@ class RQManage(RQNode):
                                f" with timeout {self._timeout_sec}")
 
         self.hat.control_comms(enable=True)
+        self.hat.charger_control(on=True)
         while True:
             ROSspin_once(node=self, timeout_sec=0)
             sentence = self.hat._read_sentence()

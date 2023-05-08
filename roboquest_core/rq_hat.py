@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Callable
+from typing import Callable, Tuple
 import serial
 import RPi.GPIO as GPIO
 
@@ -16,8 +16,8 @@ class HAT_GPIO_PIN(Enum):
     COMMS_ENABLE = 22
     FET_1_ENABLE = 24
     FET_2_ENABLE = 25
-    CHARGER_DISABLE = 21
-    CHARGER_DETECT = 7
+    CHARGE_BATTERY = 21
+    CHARGER_POWERED = 7
 
 
 class HAT_SCREEN(Enum):
@@ -141,25 +141,6 @@ class RQHAT(object):
         the following. Every line is terminated with \r\n:
 
 $$TELEM 12.39 0.13 0.05 1.67 1.68 1.69 1.70 0.00 1
-$$TELEM 12.37 0.12 0.09 1.67 1.68 1.69 1.70 0.00 1
-$$TELEM 12.38 0.12 0.05 1.68 1.69 1.70 1.70 0.00 1
-$$TELEM 12.39 0.12 0.05 1.67 1.69 1.70 1.70 0.00 1
-$$TELEM 12.38 0.12 0.05 1.67 1.69 1.69 1.70 0.00 1
-$$TELEM 12.37 0.23 0.01 1.68 1.69 1.70 1.71 0.00 1
-$$TELEM 12.39 0.18 0.05 1.68 1.69 1.70 1.71 0.00 1
-$$TELEM 12.37 0.16 -0.02 1.66 1.68 1.69 1.70 0.00 1
-$$TELEM 12.37 0.17 -0.02 1.66 1.67 1.68 1.70 0.00 1
-$$TELEM 12.38 0.17 0.05 1.67 1.69 1.69 1.69 0.00 1
-$$TELEM 12.37 0.16 0.05 1.66 1.67 1.68 1.69 0.00 1
-$$TELEM 12.38 0.17 0.01 1.65 1.66 1.68 1.69 0.00 1
-$$TELEM 12.38 0.17 0.01 1.65 1.66 1.67 1.69 0.00 1
-$$TELEM 12.39 0.20 -0.02 1.66 1.68 1.68 1.69 0.00 1
-$$TELEM 12.38 0.21 -0.06 1.67 1.68 1.69 1.70 0.00 1
-$$TELEM 12.37 0.21 0.01 1.66 1.68 1.68 1.70 0.00 1
-$$TELEM 12.39 0.20 -0.02 1.65 1.67 1.68 1.69 0.00 1
-$$TELEM 12.38 0.20 0.01 1.66 1.67 1.67 1.69 0.00 1
-$$TELEM 12.38 0.21 -0.02 1.66 1.68 1.68 1.70 0.00 1
-$$TELEM 12.37 0.20 -0.06 1.66 1.67 1.69 1.70 0.00 1
 $$SCREEN 1 0
         """
 
@@ -179,7 +160,7 @@ $$SCREEN 1 0
 
     def cleanup_gpio(self):
         if self._controls_state['charger'] == 'ENABLED':
-            GPIO.output(HAT_GPIO_PIN.CHARGER_DISABLE.value, GPIO.HIGH)
+            GPIO.output(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.HIGH)
             self._controls_state['charger'] = 'DISABLED'
 
         if self._controls_state['fet_1'] == 'ENABLED':
@@ -210,8 +191,12 @@ $$SCREEN 1 0
         GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
 
-        GPIO.setup(HAT_GPIO_PIN.CHARGER_DISABLE.value, GPIO.OUT)
-        GPIO.output(HAT_GPIO_PIN.CHARGER_DISABLE.value, GPIO.LOW)
+        #
+        # Subsequent control of the battery charger should use
+        # charger_control().
+        #
+        GPIO.setup(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.OUT)
+        GPIO.output(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.LOW)
         self._controls_state['charger'] = 'ENABLED'
 
         GPIO.setup(HAT_GPIO_PIN.FET_1_ENABLE.value, GPIO.OUT)
@@ -222,25 +207,60 @@ $$SCREEN 1 0
         GPIO.output(HAT_GPIO_PIN.FET_2_ENABLE.value, GPIO.LOW)
         self._controls_state['fet_2'] = 'DISABLED'
 
+        #
+        # Subsequent control of the communications channel should use
+        # control_comms().
+        #
         GPIO.setup(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.OUT)
         GPIO.output(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.LOW)
         self._controls_state['comms'] = 'DISABLED'
 
-        GPIO.setup(HAT_GPIO_PIN.CHARGER_DETECT.value, GPIO.IN)
+        GPIO.setup(HAT_GPIO_PIN.CHARGER_POWERED.value, GPIO.IN)
 
-    def _charger_control(self, enable: bool = False) -> None:
-        # TODO: implement
-        pass
+    def charger_state(self) -> Tuple[bool, bool]:
+        """
+        Return two booleans indicating if the battery is being charged and
+        if the charger is powered.
+        """
 
-    def _current_control(self,
-                         enable_driver1: bool = False,
-                         enable_driver2: bool = False) -> None:
-        # TODO: Implement
-        pass
+        power_pin = GPIO.input(HAT_GPIO_PIN.CHARGER_POWERED.value)
+        charger_has_power = True if power_pin == GPIO.HIGH else False
 
-    def _set_sleep_duration(self, sleep_secs: int = 0) -> None:
-        # TODO: Implement
-        pass
+        if not charger_has_power:
+            #
+            # If the charger doesn't have power, it can't charge the battery.
+            #
+            battery_charging = False
+            self.charger_control(on=False)
+        else:
+            state_of_charger = self._controls_state['charger']
+            battery_charging = True if state_of_charger == 'ENABLED' else False
+
+        return battery_charging, charger_has_power
+
+    def charger_control(self, on: bool = False) -> None:
+        new_state = 'ENABLED' if on else 'DISABLED'
+        if self._controls_state['charger'] != new_state:
+            #
+            # This pin is non-standard. Setting it LOW enables the charger.
+            #
+            new_pin_output = GPIO.LOW if on else GPIO.HIGH
+            GPIO.output(HAT_GPIO_PIN.CHARGE_BATTERY.value, new_pin_output)
+            self._controls_state['charger'] = new_state
+
+    def fet1_control(self, on: bool = False) -> None:
+        new_state = 'ENABLED' if on else 'DISABLED'
+        if self._controls_state['fet_1'] != new_state:
+            new_pin_output = GPIO.HIGH if on else GPIO.LOW
+            GPIO.output(HAT_GPIO_PIN.FET_1_ENABLE.value, new_pin_output)
+            self._controls_state['fet_1'] = new_state
+
+    def fet2_control(self, on: bool = False) -> None:
+        new_state = 'ENABLED' if on else 'DISABLED'
+        if self._controls_state['fet_2'] != new_state:
+            new_pin_output = GPIO.HIGH if on else GPIO.LOW
+            GPIO.output(HAT_GPIO_PIN.FET_2_ENABLE.value, new_pin_output)
+            self._controls_state['fet_2'] = new_state
 
     def _get_network_device(self):
         """
