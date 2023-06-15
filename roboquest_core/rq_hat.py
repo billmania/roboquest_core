@@ -4,8 +4,16 @@ import serial
 import RPi.GPIO as GPIO
 
 READ_EOL = b'\r\n'
-WRITE_EOL = b'\r'
 READ_TIMEOUT_SEC = 0.2
+
+TELEM_HEADER = '$$TELEM'
+SCREEN_HEADER = '$$SCREEN'
+
+COLUMNS = 23
+LINES = 4
+BYTES = 141
+EOL = '\n'
+EOB = '\r'
 
 
 class HAT_GPIO_PIN(Enum):
@@ -21,6 +29,23 @@ class HAT_GPIO_PIN(Enum):
 
 
 class HAT_SCREEN(Enum):
+    """
+    There are a total of five screens available from the HAT. Two of
+    the screens can have multiple pages.
+    The information on screens HOME and ABOUT comes directly from the HAT.
+    The DEVICES AND CONNECTIONS screens are populated with information
+    off the HAT. The MISC screen is not used.
+
+    SCREEN_HEADER messages are written by the HAT to the serial port on each
+    of three conditions:
+        1. an update cycle has arrived
+        2. a different screen is now displayed
+        3. the PREVIOUS_PAGE, NEXT_PAGE, or ENTER button was pressed
+
+    The value of each member is left as the string representation of the
+    number because the integer isn't needed and a cast can be avoided.
+    """
+
     HOME = '1'
     DEVICES = '2'
     CONNECTIONS = '3'
@@ -31,10 +56,19 @@ class HAT_SCREEN(Enum):
 
 
 class HAT_BUTTON(Enum):
-    DOWN = '-1'
-    UP = '1'
-    ENTER = '2'
-    NO_BUTTON = '0'
+    """
+    The PREVIOUS_PAGE and NEXT_PAGE buttons cycle through the pages of
+    a screen. The ENTER button is the command to select or enable the
+    item currently displayed on the screen. For the update cycle SCREEN
+    message, NO_BUTTON is sent.
+
+    NEXT_PAGE and PREVIOUS_PAGE are used as integers.
+    """
+
+    NEXT_PAGE = -1
+    PREVIOUS_PAGE = 1
+    ENTER = 2
+    NO_BUTTON = 0
 
 
 class RQHAT(object):
@@ -115,13 +149,13 @@ class RQHAT(object):
         except serial.SerialException:
             self._hat = None
 
-    def _write_sentence(self, sentence: str) -> None:
+    def write_sentence(self, sentence: str) -> None:
         """
-        Append the WRITE_EOL and then write the sentence.
+        Encode from ASCII and then write the sentence.
         """
 
         if 0 < len(sentence):
-            bytes_to_write = bytearray(sentence + WRITE_EOL, 'ascii')
+            bytes_to_write = bytearray(sentence, 'ascii')
             try:
                 bytes_written = self._hat.write(bytes_to_write)
                 if bytes_written != len(bytes_to_write):
@@ -132,7 +166,7 @@ class RQHAT(object):
 
         return None
 
-    def _read_sentence(self) -> str:
+    def read_sentence(self) -> str:
         """
         Read one sentence from the serial port or timeout. Return
         the sentence after stripping the READ_EOL.
@@ -262,24 +296,17 @@ $$SCREEN 1 0
             GPIO.output(HAT_GPIO_PIN.FET_2_ENABLE.value, new_pin_output)
             self._controls_state['fet_2'] = new_state
 
-    def _get_network_device(self):
-        """
-        Populates the Devices screen of the UI.
-        Get the NM Connections which are currently active, ie. applied to a
-        NM Device (interface). Collect the details about each NM Device and
-        return it to the display, so it can be used to connect with a specific
-        network interface.
-        """
+    def pad_line(self, text: str) -> str:
+        return text.ljust(COLUMNS, ' ') + EOL
 
-        # TODO: Implement
-        pass
-
-    def _get_network_connections(self):
+    def pad_text(self, text) -> str:
         """
-        Populates the Connections screen of the UI.
+        Pad text to a total of LINES lines of text by adding
+        four blank lines to the end of text and then truncating
+        the result to BYTES characters.
 
-        Parse the list of all defined NM Connections.
+        This is done primarily to ensure a shorter new text completely
+        overwrites a longer, older text.
         """
 
-        # TODO: Implement
-        pass
+        return (text + self.pad_line('') * LINES)[:BYTES] + EOB

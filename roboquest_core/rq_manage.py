@@ -5,6 +5,9 @@ from rclpy import shutdown as ROSshutdown
 import diagnostic_msgs
 from roboquest_core.rq_node import RQNode
 from roboquest_core.rq_hat import RQHAT
+from roboquest_core.rq_network import RQNetwork
+from roboquest_core.rq_hat import TELEM_HEADER, SCREEN_HEADER
+from roboquest_core.rq_hat import HAT_SCREEN, HAT_BUTTON
 from rq_msgs.srv import Control
 from rq_msgs.msg import Telemetry
 
@@ -27,16 +30,22 @@ class RQManage(RQNode):
         self._screen_sentences = 0
         self._sentence_errors = 0
 
+        self._previous_screen = 0
+
         self._setup_ros_graph()
 
         self._timeout_sec = 1 / self._parameters['hat_comms_read_hz']
-        self.hat = RQHAT(port=self._parameters['hat_port'],
-                         data_rate=self._parameters['hat_data_rate'],
-                         data_bits=self._parameters['hat_data_bits'],
-                         parity=self._parameters['hat_parity'],
-                         stop_bits=self._parameters['hat_stop_bits'],
-                         read_timeout_sec=self._timeout_sec,
-                         serial_errors_cb=None)
+        self._hat = RQHAT(port=self._parameters['hat_port'],
+                          data_rate=self._parameters['hat_data_rate'],
+                          data_bits=self._parameters['hat_data_bits'],
+                          parity=self._parameters['hat_parity'],
+                          stop_bits=self._parameters['hat_stop_bits'],
+                          read_timeout_sec=self._timeout_sec,
+                          serial_errors_cb=None)
+        self._network = RQNetwork(
+            self.get_logger().warning,
+            self._hat.pad_line,
+            self._hat.pad_text)
 
     def _control_cb(self, request, response):
         response.success = True
@@ -44,17 +53,17 @@ class RQManage(RQNode):
         if request.set_charger != 'IGNORE':
             set_charger_on = True if request.set_charger == 'ON' \
                 else False
-            self.hat.charger_control(set_charger_on)
+            self._hat.charger_control(set_charger_on)
 
         if request.set_fet1 != 'IGNORE':
             set_fet1_on = True if request.set_fet1 == 'ON' \
                 else False
-            self.hat.fet1_control(set_fet1_on)
+            self._hat.fet1_control(set_fet1_on)
 
         if request.set_fet2 != 'IGNORE':
             set_fet2_on = True if request.set_fet2 == 'ON' \
                 else False
-            self.hat.fet2_control(set_fet2_on)
+            self._hat.fet2_control(set_fet2_on)
 
         return response
 
@@ -107,13 +116,9 @@ class RQManage(RQNode):
         telemetry_msg.adc3_v = float(fields[7])
         telemetry_msg.adc4_v = float(fields[8])
         telemetry_msg.battery_charging, telemetry_msg.charger_has_power = \
-            self.hat.charger_state()
+            self._hat.charger_state()
 
         self._telemetry_pub.publish(telemetry_msg)
-
-    def _process_screen(self, fields: List[str]) -> None:
-        # TODO: Implement
-        pass
 
     def _process_sentence(self, sentence: str):
         """
@@ -123,18 +128,36 @@ class RQManage(RQNode):
         if sentence:
             fields = sentence.split()
 
-            if fields[0] == '$$TELEM':
+            if fields[0] == TELEM_HEADER:
                 if len(fields) == 9:
                     self._publish_telemetry(fields)
                     self._telem_sentences += 1
                     return
 
-            elif fields[0] == '$$SCREEN':
+            elif fields[0] == SCREEN_HEADER:
                 if len(fields) == 3:
-                    self.hat.control_comms(enable=False)
-                    self._process_screen(fields)
-                    self.hat.control_comms(enable=True)
-                    self._screen_sentences += 1
+                    try:
+                        screen = HAT_SCREEN(fields[1])
+                        button = HAT_BUTTON(int(fields[2]))
+
+                    except Exception as e:
+                        self.get_logger().warning(
+                            f"SCREEN_HEADER Exception: {e}")
+                        return
+
+                    if (screen != self._previous_screen
+                            or button != HAT_BUTTON.NO_BUTTON):
+                        self._hat.control_comms(enable=False)
+
+                        page_text = self._network.process_screen_request(
+                            screen, button)
+
+                        self._hat.write_sentence(page_text)
+
+                        self._screen_sentences += 1
+                        self._previous_screen = screen
+                        self._hat.control_comms(enable=True)
+
                     return
 
         self.get_logger().warning(f"Unusable sentence {sentence}",
@@ -167,11 +190,11 @@ class RQManage(RQNode):
         self.get_logger().info(f"{self._node_name} spinning"
                                f" with timeout {self._timeout_sec}")
 
-        self.hat.control_comms(enable=True)
-        self.hat.charger_control(on=True)
+        self._hat.control_comms(enable=True)
+        self._hat.charger_control(on=True)
         while True:
             ROSspin_once(node=self, timeout_sec=0)
-            sentence = self.hat._read_sentence()
+            sentence = self._hat.read_sentence()
 
             if sentence:
                 self._process_sentence(sentence)
