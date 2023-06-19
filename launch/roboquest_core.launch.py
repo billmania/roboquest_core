@@ -12,12 +12,18 @@ def generate_launch_description():
         'roboquest_base.yaml'
     )
 
-    roboquest_base_node = Node(
+    rq_base_node = Node(
         package="roboquest_core",
         executable="roboquest_base_node.py",
         parameters=[base_config]
     )
 
-    ld.add_action(roboquest_base_node)
+    rq_camera_node = Node(
+        package="usb_cam",
+        executable="usb_cam_node_exe"
+    )
+
+    ld.add_action(rq_base_node)
+    ld.add_action(rq_camera_node)
 
     return ld
