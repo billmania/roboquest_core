@@ -1,0 +1,8 @@
+/**:
+  ros__parameters:
+    name: "camera_node"
+    framerate: 3.0
+    video_device: /dev/video0
+    brightness: 128
+    contrast: 128
+    saturation: 128
