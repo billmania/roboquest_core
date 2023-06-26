@@ -40,7 +40,7 @@ class RQMotors(object):
 
         self._write_errors = 0
 
-        self._motor_max_speed = 0
+        self._motor_max_speed = 100
         self._motors_enabled = False
 
         self._setup_gpio()
@@ -121,7 +121,7 @@ class RQMotors(object):
         """
 
         if not self._motors_enabled:
-            return
+            return False
 
         tries = 3
         while tries:
