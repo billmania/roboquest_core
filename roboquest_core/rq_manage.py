@@ -3,8 +3,11 @@ from rclpy.parameter import Parameter
 from rclpy import spin_once as ROSspin_once
 from rclpy import shutdown as ROSshutdown
 import diagnostic_msgs
+from geometry_msgs.msg import TwistStamped
+
 from roboquest_core.rq_node import RQNode
 from roboquest_core.rq_hat import RQHAT
+from roboquest_core.rq_motors import RQMotors
 from roboquest_core.rq_network import RQNetwork
 from roboquest_core.rq_hat import TELEM_HEADER, SCREEN_HEADER
 from roboquest_core.rq_hat import HAT_SCREEN, HAT_BUTTON
@@ -46,6 +49,36 @@ class RQManage(RQNode):
             self.get_logger().warning,
             self._hat.pad_line,
             self._hat.pad_text)
+        self._motors = RQMotors()
+        # TODO: Figure out what sets this limit
+        self._motors.set_motor_max_speed(100)
+
+    def _motion_cb(self, msg: TwistStamped):
+        """
+        Extract the linear.x and angular.z from the Twist message,
+        convert it to an x and y velocity, and pass it to the
+        motors controller.
+        """
+
+        if not self._motors.motors_are_enabled():
+            self.get_logger().warning("motors are not enabled",
+                                      throttle_duration_sec=60)
+            return
+
+        # TODO: Change this to debug
+        self.get_logger().info("motion_cb"
+                               f" linear_x: {msg.twist.linear.x}"
+                               f", angular_z: {msg.twist.angular.z}")
+
+        # TODO: Change to only extract and convert the values
+        # TODO: Replace with a conversion of linear and angular to velocities
+        right_velocity = msg.twist.linear.x
+        left_velocity = msg.twist.angular.z
+        if not self._motors.set_motors_velocity(right=right_velocity,
+                                                left=left_velocity):
+            self.get_logger().warning("failed to set motors velocity")
+
+
 
     def _control_cb(self, request, response):
         response.success = True
@@ -65,6 +98,11 @@ class RQManage(RQNode):
                 else False
             self._hat.fet2_control(set_fet2_on)
 
+        if request.set_motors != 'IGNORE':
+            set_motors_on = True if request.set_motors == 'ON' \
+                else False
+            self._motors.enable_motors(set_motors_on)
+
         return response
 
     def _setup_ros_graph(self):
@@ -73,7 +111,11 @@ class RQManage(RQNode):
         """
 
         self._telemetry_pub = self.create_publisher(Telemetry, 'telemetry', 1)
-        self._charger_srv = self.create_service(Control,
+        self._motion_sub = self.create_subscription(TwistStamped,
+                                                    'cmd_vel',
+                                                    self._motion_cb,
+                                                    1)
+        self._control_srv = self.create_service(Control,
                                                 'control_hat',
                                                 self._control_cb)
 
