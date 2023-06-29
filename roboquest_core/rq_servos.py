@@ -3,7 +3,7 @@ from time import sleep
 import smbus2
 
 import RPi.GPIO as GPIO
-from rq_servos_config import SERVO_QTY, servo_config
+from rq_servos_config import servo_config
 
 SERVO_ENABLE_PIN = 23
 I2C_BUS_ID = 1
@@ -58,7 +58,7 @@ class RQServos(object):
 
         self._write_errors = 0
 
-        self._servos, self._servos_state = servo_config()
+        self._servos, self._name_map, self._servos_state = servo_config()
         self._controller_powered = False
 
         self._setup_gpio()
@@ -89,42 +89,49 @@ class RQServos(object):
         return ((value - in_min) * (out_max - out_min)
                 / (in_max - in_min) + out_min)
 
-    def _set_servo_pwm(self, id: int, on: int, off: int) -> None:
+    def _set_servo_pwm(self, channel: int, on: int, off: int) -> None:
         """
         Command the servo with a specific PWM signal, which was calculated
         based on a desired angle.
         """
 
         self._bus.write_byte_data(I2C_DEVICE_ID,
-                                  PULSE0_ON_L_REG+4*id,
+                                  PULSE0_ON_L_REG+4*channel,
                                   on & 0xFF)
         self._bus.write_byte_data(I2C_DEVICE_ID,
-                                  PULSE0_ON_H_REG+4*id,
+                                  PULSE0_ON_H_REG+4*channel,
                                   on >> 8)
         self._bus.write_byte_data(I2C_DEVICE_ID,
-                                  PULSE0_OFF_L_REG+4*id,
+                                  PULSE0_OFF_L_REG+4*channel,
                                   off & 0xFF)
         self._bus.write_byte_data(I2C_DEVICE_ID,
-                                  PULSE0_OFF_H_REG+4*id,
+                                  PULSE0_OFF_H_REG+4*channel,
                                   off >> 8)
 
-    def set_servo_angle(self, id: int, angle: int = None) -> None:
+    def set_servo_angle(self, channel: int, angle: int = None) -> None:
         """
-        For servo id set its angle.
+        For servo channel set its angle. If no angle is provided, set
+        the default angle. The default is either the previously
+        set angle or the init_angle_deg from the configuration.
         """
 
-        if angle is None:
-            angle = self._servos_state[id]['angle']
+        if self._controller_powered and self._servos_state[channel]['enabled']:
+            if angle is None:
+                angle = self._servos_state[channel]['angle']
 
-        if self._controller_powered and self._servos_state[id]['enabled']:
-            angle = self._constrain(0, angle, self._servos[id].angle_max_deg)
-            self._servos_state[id]['angle'] = angle
+            servo = self._servos[channel]
+            angle = self._constrain(servo.angle_min_deg,
+                                    angle,
+                                    servo.angle_max_deg)
+            self._servos_state[channel]['angle'] = angle
 
+            # TODO: Figure out what this magic 0 means.
             off_pulse = self._translate(angle,
                                         0,
-                                        self._servos[id].angle_max_deg,
-                                        self._servos[id].pulse_min,
-                                        self._servos[id].pulse_max)
+                                        servo.angle_max_deg,
+                                        servo.pulse_min,
+                                        servo.pulse_max)
+            # TODO: And these magic numbers too.
             off_count = self._constrain(0,
                                         int(self._translate(off_pulse,
                                                             0,
@@ -134,7 +141,7 @@ class RQServos(object):
                                         4095)
 
             on_count = 0
-            self._set_servo_pwm(id, on_count, off_count)
+            self._set_servo_pwm(channel, on_count, off_count)
 
     def _pca9685_init(self):
         """
@@ -144,44 +151,49 @@ class RQServos(object):
         MODE2 to totem pole
         PRESCALE to 50 Hz
 
-        Set the initial angle of each servo according to the configuration
-        parameters.
+        Set the initial angle of each defined servo according to the
+        configuration parameters.
         """
 
         for register, value in SETUPS:
             self._bus.write_byte_data(I2C_DEVICE_ID, register, value)
             sleep(0.05)
 
-        for id in range(SERVO_QTY):
-            self._servos_state[id]['enabled'] = True
-            self.set_servo_angle(id, self._servos[id].angle_init_deg)
-            sleep(self._servos[id].init_delay_s)
+        for servo in self._servos:
+            channel = servo.channel
 
-    def servos_are_enabled(self) -> bool:
+            if servo.name != 'undefined':
+                self._servos_state[channel]['enabled'] = True
+                self.set_servo_angle(channel, servo.angle_init_deg)
+                sleep(servo.init_delay_s)
+            else:
+                self.disable_servo(channel)
+
+    def controller_powered(self) -> bool:
         """
-        Returns True when the servos are enabled.
+        Returns True when the servo controller is powered.
         """
 
         return self._controller_powered
 
-    def disable_servo(self, id: int) -> None:
+    def disable_servo(self, channel: int) -> None:
         """
         Flat-line the PWM signal to the servo and prevent a new angle
         from being set by set_servo_angle(). The effect of this method
         is undone by restore_servo_angle().
         """
 
-        self._servos_state[id]['enabled'] = False
-        self._set_servo_pwm(id, 0, 0)
+        self._servos_state[channel]['enabled'] = False
+        self._set_servo_pwm(channel, 0, 0)
 
-    def restore_servo_angle(self, id: int) -> None:
+    def restore_servo_angle(self, channel: int) -> None:
         """
         Set the servo to its most recent angle, to recover from the
         PWM signal having been flat-lined by disable_servo().
         """
 
-        self._servos_state[id]['enabled'] = True
-        self.set_servo_angle(id)
+        self._servos_state[channel]['enabled'] = True
+        self.set_servo_angle(channel)
 
     def set_power(self, enable: bool = False) -> None:
         """
