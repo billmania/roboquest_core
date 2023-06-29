@@ -1,9 +1,10 @@
+from typing import Union
 from time import sleep
 
 import smbus2
 
 import RPi.GPIO as GPIO
-from rq_servos_config import servo_config
+from roboquest_core.rq_servos_config import servo_config
 
 SERVO_ENABLE_PIN = 23
 I2C_BUS_ID = 1
@@ -108,22 +109,29 @@ class RQServos(object):
                                   PULSE0_OFF_H_REG+4*channel,
                                   off >> 8)
 
-    def set_servo_angle(self, channel: int, angle: int = None) -> None:
+    def set_servo_angle(self,
+                        channel: Union[int, str],
+                        angle: int = None) -> None:
         """
         For servo channel set its angle. If no angle is provided, set
         the default angle. The default is either the previously
         set angle or the init_angle_deg from the configuration.
         """
 
-        if self._controller_powered and self._servos_state[channel]['enabled']:
-            if angle is None:
-                angle = self._servos_state[channel]['angle']
-
+        if isinstance(channel, str):
+            servo = self._name_map[channel]
+        else:
             servo = self._servos[channel]
+
+        if (self._controller_powered
+                and self._servos_state[servo.channel]['enabled']):
+            if angle is None:
+                angle = self._servos_state[servo.channel]['angle']
+
             angle = self._constrain(servo.angle_min_deg,
                                     angle,
                                     servo.angle_max_deg)
-            self._servos_state[channel]['angle'] = angle
+            self._servos_state[servo.channel]['angle'] = angle
 
             # TODO: Figure out what this magic 0 means.
             off_pulse = self._translate(angle,
@@ -141,7 +149,7 @@ class RQServos(object):
                                         4095)
 
             on_count = 0
-            self._set_servo_pwm(channel, on_count, off_count)
+            self._set_servo_pwm(servo.channel, on_count, off_count)
 
     def _pca9685_init(self):
         """
