@@ -8,9 +8,6 @@ from roboquest_core.rq_servos_config import servo_config
 
 SERVO_ENABLE_PIN = 23
 I2C_BUS_ID = 1
-#
-# There's an unknown device at 0x70 on bus 1.
-#
 I2C_DEVICE_ID = 0x40
 
 WRITE_ERROR_WAIT_S = 0.01
