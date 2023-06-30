@@ -6,10 +6,7 @@ import smbus2
 import RPi.GPIO as GPIO
 
 MOTOR_ENABLE_PIN = 17
-#
-# BUS ID 6 doesn't appear on the RaspPi
-#
-I2C_BUS_ID = 1
+I2C_BUS_ID = 6
 I2C_DEVICE_ID = 0x53
 
 I2C_MOTOR_RIGHT_REGISTER = 3
@@ -22,15 +19,6 @@ class RQMotors(object):
     """
     Manages the operation of the two drive motors connected to the I2C
     bus.
-
-    pub_motorPwrState = rospy.Publisher(
-        'motor_controller_power_enable_state',
-        Bool,
-        queue_size = 1,
-        latch = True)
-    rospy.Subscriber("drive_joystick",Vector3, callback_drivejs)
-    rospy.Subscriber("motor_controller_power_enable",Bool, callback_enable)
-    rospy.Subscriber("motor_controller_max_speed",Float64, callback_speed)
     """
 
     def __init__(self):

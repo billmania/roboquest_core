@@ -8,11 +8,13 @@ from geometry_msgs.msg import TwistStamped
 from roboquest_core.rq_node import RQNode
 from roboquest_core.rq_hat import RQHAT
 from roboquest_core.rq_motors import RQMotors
+from roboquest_core.rq_servos import RQServos
 from roboquest_core.rq_network import RQNetwork
 from roboquest_core.rq_hat import TELEM_HEADER, SCREEN_HEADER
 from roboquest_core.rq_hat import HAT_SCREEN, HAT_BUTTON
 from rq_msgs.srv import Control
 from rq_msgs.msg import Telemetry
+from rq_msgs.msg import ServoAngles
 
 
 class RQManage(RQNode):
@@ -50,10 +52,32 @@ class RQManage(RQNode):
             self._hat.pad_line,
             self._hat.pad_text)
         self._motors = RQMotors()
+        self._servos = RQServos()
         # TODO: Figure out what sets this limit
         self._motors.set_motor_max_speed(100)
 
-    def _motion_cb(self, msg: TwistStamped):
+    def _servo_cb(self, msg: ServoAngles) -> None:
+        """
+        Extract the requested angle for each named servo and
+        send them to the servo controller. This method could need
+        a long time to run, dependent upon the configuration of the
+        servo delays and the quantity of servo commands in the
+        message.
+        Servo angle commands which are outside the configured
+        range of the servo are silently ignored. Commands to servos
+        which are currently disabled are silently ignored, too.
+        """
+
+        if not self._servos.controller_powered():
+            self.get_logger().warning("servos are not enabled",
+                                      throttle_duration_sec=60)
+            return
+
+        # TODO: Refactor this into putting the commands in a queue
+        for servo in msg.servos:
+            self._servos.set_servo_angle(servo.name, servo.angle)
+
+    def _motor_cb(self, msg: TwistStamped):
         """
         Extract the linear.x and angular.z from the Twist message,
         convert it to an x and y velocity, and pass it to the
@@ -66,7 +90,7 @@ class RQManage(RQNode):
             return
 
         # TODO: Change this to debug
-        self.get_logger().info("motion_cb"
+        self.get_logger().info("motor_cb"
                                f" linear_x: {msg.twist.linear.x}"
                                f", angular_z: {msg.twist.angular.z}")
 
@@ -77,8 +101,6 @@ class RQManage(RQNode):
         if not self._motors.set_motors_velocity(right=right_velocity,
                                                 left=left_velocity):
             self.get_logger().warning("failed to set motors velocity")
-
-
 
     def _control_cb(self, request, response):
         response.success = True
@@ -103,6 +125,11 @@ class RQManage(RQNode):
                 else False
             self._motors.enable_motors(set_motors_on)
 
+        if request.set_servos != 'IGNORE':
+            set_servos_on = True if request.set_servos == 'ON' \
+                else False
+            self._servos.set_power(set_servos_on)
+
         return response
 
     def _setup_ros_graph(self):
@@ -111,10 +138,14 @@ class RQManage(RQNode):
         """
 
         self._telemetry_pub = self.create_publisher(Telemetry, 'telemetry', 1)
-        self._motion_sub = self.create_subscription(TwistStamped,
-                                                    'cmd_vel',
-                                                    self._motion_cb,
-                                                    1)
+        self._motor_sub = self.create_subscription(TwistStamped,
+                                                   'cmd_vel',
+                                                   self._motor_cb,
+                                                   1)
+        self._servo_sub = self.create_subscription(ServoAngles,
+                                                   'servos',
+                                                   self._servo_cb,
+                                                   1)
         self._control_srv = self.create_service(Control,
                                                 'control_hat',
                                                 self._control_cb)
