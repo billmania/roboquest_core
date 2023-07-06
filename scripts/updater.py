@@ -3,6 +3,7 @@
 import os
 from sys import exit
 from pathlib import Path
+from requests import get
 import logging
 import json
 import docker
@@ -11,12 +12,19 @@ from time import sleep
 """
 A utility script to manage the updating of RoboQuest docker images.
 It must be executing on the same host as the docker containers and
-must execute as the superuser.
+must execute as the superuser. Its curent working directory must be
+the directory where it is installed and both the directory and script
+must be writable and executable.
+
+Required modules (on the host OS) are:
+    - docker
+    - requests
+
+Files and directories:
+    - /var/log/updater.log
+    - systemd service with auto restart
 """
 
-UPDATE_LOG = '/var/log/updater.log'
-UPDATE_FIFO = '/tmp/update_fifo'
-LOOP_PERIOD_S = 10.0
 CONTAINERS = {
     'rq_core': {
         'image_name': 'registry.q4excellence.com:5678/rq_core',
@@ -34,8 +42,13 @@ CONTAINERS = {
         'volumes': ['/dev/shm:/dev/shm',
                     'ros_logs:/root/.ros/log']}
 }
+UPDATE_LOG = '/var/log/updater.log'
+UPDATE_FIFO = '/tmp/update_fifo'
+UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
+UPDATE_SCRIPT = 'http://registry.q4excellence.com:8079/updater.py'
+LOOP_PERIOD_S = 10.0
 EOL = '\n'
-VERSION = 1
+VERSION = 2
 
 
 class RQUpdate(object):
@@ -56,6 +69,7 @@ class RQUpdate(object):
         self._messages = list()
         self._client = None
         self._fifo = None
+        self._updater_version = None
 
         self._fifo_path = fifo_path
 
@@ -119,29 +133,42 @@ class RQUpdate(object):
         are available and appear stable.
         """
 
-        # TODO: Implement
-        pass
+        result = True
+
+        response = get(UPDATE_VERSION, timeout=10.0)
+        if response.status_code == 200:
+            self._updater_version = int(response.text)
+        else:
+            logging.warning("Network connectivity requirements not met")
+            result = False
+
+        # TODO: Implement check for electrical
+
+        return result
 
     def _update_updater(self):
         """
-        If a newer version of this updater script exists, retrieve
-        and install it. Exit and allow systemd to restart it.
-
-        Retrieve the latest version and compare it to VERSION. If
-        they're different:
-            - close the FIFO
-            - retrieve the updater script
-            - install the replacement updater script
-            - execute the updater script
-            - exit
+        If a different version of this updater script is available, retrieve
+        and install it. This provides both an upgrade and a rollback mechanism.
+        Exit and allow systemd to restart it.
         """
 
-        # TODO: Implement
-        # self.close()
-        # logging.info('Replaced with newer version')
-        # exit(0)
+        if VERSION == self._updater_version:
+            return
 
-        pass
+        self.close_fifo()
+        logging.info(f'Replacing {VERSION} with {self._updater_version}')
+
+        response = get(UPDATE_SCRIPT, timeout=10.0)
+        if response.status_code == 200:
+            with open('updater.py', 'w') as f:
+                f.write(response.text)
+            logging.info('updater.py replaced')
+            logging.warning('updater.py exiting')
+            exit(0)
+        else:
+            logging.warning('Failed to retrieve updater.py,'
+                            f' status code {response.status_code}')
 
     def _get_latest_images(self):
         """
@@ -172,13 +199,11 @@ class RQUpdate(object):
         there is no local copy.
         """
 
-        self.close_fifo()
-
-        self._requirements_met()
-        self._update_updater()
-        self._get_latest_images()
-
-        self._setup_fifo()
+        if self._requirements_met():
+            self.close_fifo()
+            self._update_updater()
+            self._get_latest_images()
+            self._setup_fifo()
 
     def _process_message(self, message: str) -> None:
         """
