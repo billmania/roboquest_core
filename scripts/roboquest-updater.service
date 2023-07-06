@@ -1,0 +1,13 @@
+[Unit]
+Description=The RoboQuest software updater and monitor
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/updater.py
+User=root
+Restart=always
+RestartSec=15
+WorkingDirectory=/usr/local/bin
+
+[Install]
+WantedBy=default.target

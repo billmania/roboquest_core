@@ -21,7 +21,7 @@ Required modules (on the host OS) are:
     - requests
 
 Files and directories:
-    - /var/log/updater.log
+    - /opt/updater/updater.log
     - systemd service with auto restart
 """
 
@@ -42,13 +42,13 @@ CONTAINERS = {
         'volumes': ['/dev/shm:/dev/shm',
                     'ros_logs:/root/.ros/log']}
 }
-UPDATE_LOG = '/var/log/updater.log'
+UPDATE_LOG = '/opt/updater/updater.log'
 UPDATE_FIFO = '/tmp/update_fifo'
 UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
 UPDATE_SCRIPT = 'http://registry.q4excellence.com:8079/updater.py'
 LOOP_PERIOD_S = 10.0
 EOL = '\n'
-VERSION = 2
+VERSION = 3
 
 
 class RQUpdate(object):
