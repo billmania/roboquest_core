@@ -222,10 +222,13 @@ class RQManage(RQNode):
                             or button != HAT_BUTTON.NO_BUTTON):
                         self._hat.control_comms(enable=False)
 
-                        page_text = self._network.process_screen_request(
-                            screen, button)
-
-                        self._hat.write_sentence(page_text)
+                        if screen in [HAT_SCREEN.CONNECTIONS,
+                                      HAT_SCREEN.DEVICES]:
+                            page_text = self._network.process_screen_request(
+                                screen, button)
+                            self._hat.write_sentence(page_text)
+                        elif screen == HAT_SCREEN.STATUS:
+                            self._hat.show_status_msgs()
 
                         self._screen_sentences += 1
                         self._previous_screen = screen

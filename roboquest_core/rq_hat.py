@@ -9,11 +9,18 @@ READ_TIMEOUT_SEC = 0.2
 TELEM_HEADER = '$$TELEM'
 SCREEN_HEADER = '$$SCREEN'
 
-COLUMNS = 23
-LINES = 4
-BYTES = 141
+#
+# Constants for managing the OLED display used as the
+# RoboQuest HAT UI.
+#
+PAD_CHAR = ' '
+LINE_LENGTH = 23
+LINES = 6
+
 EOL = '\n'
 EOB = '\r'
+DISPLAY_LENGTH = (LINE_LENGTH * LINES) - len(EOB)
+COLUMNS = LINE_LENGTH - len(EOL)
 
 
 class HAT_GPIO_PIN(Enum):
@@ -34,7 +41,7 @@ class HAT_SCREEN(Enum):
     the screens can have multiple pages.
     The information on screens HOME and ABOUT comes directly from the HAT.
     The DEVICES AND CONNECTIONS screens are populated with information
-    off the HAT. The MISC screen is not used.
+    off the HAT. The STATUS screen shows status messages.
 
     SCREEN_HEADER messages are written by the HAT to the serial port on each
     of three conditions:
@@ -49,7 +56,7 @@ class HAT_SCREEN(Enum):
     HOME = '1'
     DEVICES = '2'
     CONNECTIONS = '3'
-    MISC = '4'
+    STATUS = '4'
     ABOUT = '5'
 
     UNKNOWN = '0'
@@ -121,6 +128,9 @@ class RQHAT(object):
                               stop_bits,
                               read_timeout_sec)
         self._screen_page = 0
+        self._status_lines = list()
+
+        self.status_msg('HAT setup')
 
     def _open_hat_serial(self, port: str,
                          data_rate: int,
@@ -296,17 +306,53 @@ $$SCREEN 1 0
             GPIO.output(HAT_GPIO_PIN.FET_2_ENABLE.value, new_pin_output)
             self._controls_state['fet_2'] = new_state
 
+    def status_msg(self, message: str) -> None:
+        """
+        Show a status message on the HAT OLED screen 4. message cannot contain
+        EOL characters and cannot be longer than LINE_LENGTH characters. The
+        most recent LINES messages will be shown on screen 4.
+        """
+
+        status = self.pad_line(message.replace(EOL, ' ')[:LINE_LENGTH])
+        self._status_lines.append(status)
+        if len(self._status_lines) > LINES:
+            self._status_lines.pop(0)
+
+        self.show_status_msgs()
+
+    def show_status_msgs(self) -> None:
+        """
+        Display the status messages collected by status_msg().
+        """
+
+        status_text = ''
+        for line in self._status_lines:
+            status_text += line
+
+        status_output = SCREEN_HEADER.lower()
+        status_output += '='
+        status_output += HAT_SCREEN.STATUS.value
+        status_output += '='
+        status_output += self.pad_text(status_text)
+        self.write_sentence(status_output)
+
     def pad_line(self, text: str) -> str:
-        return text.ljust(COLUMNS, ' ') + EOL
+        """
+        Return a string which contains text, left-justified, and
+        then right-padded with enough PAD_CHARs and one trailing
+        EOL to make the string length equal to COLUMNS.
+        """
+
+        return text.ljust(COLUMNS, PAD_CHAR) + EOL
 
     def pad_text(self, text) -> str:
         """
         Pad text to a total of LINES lines of text by adding
         four blank lines to the end of text and then truncating
-        the result to BYTES characters.
+        the result to DISPLAY_LENGTH characters.
 
         This is done primarily to ensure a shorter new text completely
         overwrites a longer, older text.
         """
 
-        return (text + self.pad_line('') * LINES)[:BYTES] + EOB
+        return (text + self.pad_line('') * LINES)[:DISPLAY_LENGTH] + EOB
