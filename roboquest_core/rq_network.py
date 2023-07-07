@@ -101,10 +101,8 @@ class RQNetwork(object):
             # This method was called for a SCREEN which doesn't involve
             # network connections.
             #
-            page_info += 'None'
+            page_info += ''
 
-        self._logger(
-            f"process_screen_request page_info {page_info}")
         return page_info
 
     def _get_all_connections(self) -> None:
