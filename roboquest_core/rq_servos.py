@@ -27,6 +27,12 @@ PULSE0_ON_H_REG = 0x07
 PULSE0_OFF_L_REG = 0x08
 PULSE0_OFF_H_REG = 0x09
 
+ANGLE_STEP_DEG = 10
+MIN_PULSE_US = 0
+MAX_PULSE_US = 20000
+MIN_COUNT = 0
+MAX_COUNT = 4095
+PULSE_ON_COUNT = MIN_COUNT
 
 #
 # PCA9685 constants
@@ -39,6 +45,22 @@ MODE1_VALUE = 0x00
 SETUPS = [(MODE2_REG, OUTDRV_VALUE),
           (PRESCALE_REG, PRESCALE_VALUE),
           (MODE1_REG, MODE1_VALUE)]
+
+
+class TranslateError(Exception):
+    """
+    Errors in calls to or operation of the _translate() method.
+    """
+
+    pass
+
+
+class MotionError(Exception):
+    """
+    Errors in calls to or operation of the _slow_motion() method.
+    """
+
+    pass
 
 
 class RQServos(object):
@@ -78,16 +100,34 @@ class RQServos(object):
 
         self._bus = smbus2.SMBus(I2C_BUS_ID)
 
-    def _translate(self, value, in_min, in_max, out_min, out_max) -> int:
+    def _translate(self,
+                   input_value: int,
+                   input_min: int, input_max: int,
+                   output_min: int, output_max: int) -> int:
         """
-        Translate value somehow. The original implementation of this method
-        was named 'map' which is an existing Python builtin function.
+        input_value must be in the range [input_min, input_max].
+        Map input_value onto the range [output_min, output_max].
+        Return the mapped value.
         """
 
-        return ((value - in_min) * (out_max - out_min)
-                / (in_max - in_min) + out_min)
+        if not output_min < output_max:
+            raise TranslateError("output range error"
+                                 f" range {output_min}, {output_max}")
+        if not input_min < input_max:
+            raise TranslateError("input range error"
+                                 f" range {input_min}, {input_max}")
+        if not input_min <= input_value <= input_max:
+            raise TranslateError(f"input_value {input_value} not within"
+                                 f" range {input_min}, {input_max}")
 
-    def _set_servo_pwm(self, channel: int, on: int, off: int) -> None:
+        return ((input_value - input_min) * (output_max - output_min)
+                / (input_max - input_min) + output_min)
+
+    def _set_servo_pwm(
+            self,
+            channel: int,
+            on_count: int,
+            off_count: int) -> None:
         """
         Command the servo with a specific PWM signal, which was calculated
         based on a desired angle.
@@ -95,24 +135,29 @@ class RQServos(object):
 
         self._bus.write_byte_data(I2C_DEVICE_ID,
                                   PULSE0_ON_L_REG+4*channel,
-                                  on & 0xFF)
+                                  on_count & 0xFF)
         self._bus.write_byte_data(I2C_DEVICE_ID,
                                   PULSE0_ON_H_REG+4*channel,
-                                  on >> 8)
+                                  on_count >> 8)
         self._bus.write_byte_data(I2C_DEVICE_ID,
                                   PULSE0_OFF_L_REG+4*channel,
-                                  off & 0xFF)
+                                  off_count & 0xFF)
         self._bus.write_byte_data(I2C_DEVICE_ID,
                                   PULSE0_OFF_H_REG+4*channel,
-                                  off >> 8)
+                                  off_count >> 8)
 
     def set_servo_angle(self,
                         channel: Union[int, str],
-                        angle: int = None) -> None:
+                        angle: int = None) -> int:
         """
         For servo channel set its angle. If no angle is provided, set
-        the default angle. The default is either the previously
-        set angle or the init_angle_deg from the configuration.
+        the default angle. The default is the previously set angle.
+
+        The flow is from an angle in degrees, to a pulse duration
+        in microseconds, and finally to a register value in "counts".
+
+        The return value is the angle to which the servo was actually
+        moved, after limiting the acceleration.
         """
 
         if isinstance(channel, str):
@@ -125,28 +170,35 @@ class RQServos(object):
             if angle is None:
                 angle = self._servos_state[servo.channel]['angle']
 
-            angle = self._constrain(servo.angle_min_deg,
+            angle = self._constrain(servo.joint_angle_min_deg,
                                     angle,
-                                    servo.angle_max_deg)
+                                    servo.joint_angle_max_deg)
+
+            angle = self._slow_motion(
+                self._servos_state[servo.channel]['angle'],
+                angle)
+
+            pulse_duration_ms = self._translate(
+                angle,
+                servo.servo_angle_min_deg,
+                servo.servo_angle_max_deg,
+                servo.pulse_min_us,
+                servo.pulse_max_us)
+
+            pulse_off_count = self._translate(
+                pulse_duration_ms,
+                MIN_PULSE_US,
+                MAX_PULSE_US,
+                MIN_COUNT,
+                MAX_COUNT)
+
+            self._set_servo_pwm(
+                servo.channel,
+                PULSE_ON_COUNT,
+                round(pulse_off_count))
             self._servos_state[servo.channel]['angle'] = angle
 
-            # TODO: Figure out what this magic 0 means.
-            off_pulse = self._translate(angle,
-                                        0,
-                                        servo.angle_max_deg,
-                                        servo.pulse_min,
-                                        servo.pulse_max)
-            # TODO: And these magic numbers too.
-            off_count = self._constrain(0,
-                                        int(self._translate(off_pulse,
-                                                            0,
-                                                            20000,
-                                                            0,
-                                                            4095)),
-                                        4095)
-
-            on_count = 0
-            self._set_servo_pwm(servo.channel, on_count, off_count)
+            return angle
 
     def _pca9685_init(self):
         """
@@ -167,10 +219,16 @@ class RQServos(object):
         for servo in self._servos:
             channel = servo.channel
 
-            if servo.name != 'undefined':
+            if servo.joint_name:
                 self._servos_state[channel]['enabled'] = True
-                self.set_servo_angle(channel, servo.angle_init_deg)
-                sleep(servo.init_delay_s)
+                #
+                # There isn't a way to know the servo's current
+                # angle so the following call may cause high acceleration
+                # of the servo angle.
+                #
+                self.set_servo_angle(
+                    channel,
+                    servo.joint_angle_init_deg)
             else:
                 self.disable_servo(channel)
 
@@ -197,8 +255,8 @@ class RQServos(object):
         PWM signal having been flat-lined by disable_servo().
         """
 
-        self._servos_state[channel]['enabled'] = True
         self.set_servo_angle(channel)
+        self._servos_state[channel]['enabled'] = True
 
     def set_power(self, enable: bool = False) -> None:
         """
@@ -221,3 +279,37 @@ class RQServos(object):
         """
 
         return max(min(value, max_value), min_value)
+
+    def _slow_motion(
+            self,
+            from_angle: int,
+            to_angle: int,
+            step_amount: int = ANGLE_STEP_DEG) -> int:
+        """
+        Since the servo controller doesn't provide a means to adjust
+        the speed of the servo angle change or to reduce the acceleration,
+        this method will limit the amount of angle change per cycle,
+        as a crude way of reducing the acceleration.
+        from_angle is the starting point and to_angle is the destination.
+        step_amount is the maximum angle to change per cycle.
+
+        The return value is the next angle for the servo.
+        """
+
+        if (not 0 <= from_angle <= 180
+                or not 0 <= to_angle <= 180):
+            raise MotionError("from or to out of range")
+
+        if from_angle == to_angle:
+            return to_angle
+
+        distance = from_angle - to_angle
+        if abs(distance) > step_amount:
+            if from_angle > to_angle:
+                next_position = from_angle - step_amount
+            else:
+                next_position = from_angle + step_amount
+        else:
+            next_position = to_angle
+
+        return next_position
