@@ -16,6 +16,8 @@ from rq_msgs.srv import Control
 from rq_msgs.msg import Telemetry
 from rq_msgs.msg import ServoAngles
 
+VERSION = 2
+
 
 class RQManage(RQNode):
     """
@@ -260,7 +262,7 @@ class RQManage(RQNode):
         Setup the serial port and then read incoming sentences in a loop.
         """
 
-        self.get_logger().info(f"{self._node_name} starting")
+        self.get_logger().info(f"{self._node_name} v{VERSION} starting")
         self.setup_diags(diags_cb=self._diags_cb)
 
         self.get_logger().info(f"{self._node_name} spinning"

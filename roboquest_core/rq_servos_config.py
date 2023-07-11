@@ -3,25 +3,58 @@ from collections import namedtuple
 
 SERVO_QTY = 16
 
+"""
+These configurations describe both the servo hardware and their
+constraints based on the way they're installed.
+
+In the Servo named tuple the attributes are grouped and described
+as follows:
+
+channel - integer channel number from 0 to SERVO_QTY-1
+servo_make_model - a string describing the servo
+servo_angle_min_deg - integer minimum possible angle for the servo, usually 0
+servo_angle_max_deg - integer maximum possible angle for the servo, usually 180
+pulse_min_us - pulse duration in microseconds to command servo_angle_min_deg
+pulse_max_us - pulse duration in microseconds to command servo_angle_max_deg
+
+joint_name - a string name for the joint
+joint_init_wait_ms - integer quantity of milliseconds to wait after
+                     initializing the servo. the more time required
+                     for the servo to move half its range, the greater
+                     this value must be.
+joint_angle_init_deg - integer initialization angle in degrees. since
+                       there's no feedback from the servo, initialization
+                       will often cause high acceleration.
+joint_angle_min_deg - integer minimum possible angle for the joint
+joint_angle_max_deg - integer maximum possible angle for the joint
+
+"""
+
 Servo = namedtuple('Servo',
                    ['channel',
-                    'name',
-                    'init_delay_s',
-                    'angle_min_deg',
-                    'angle_max_deg',
-                    'angle_init_deg',
-                    'pulse_min',
-                    'pulse_max'
+                    'servo_make_model',
+                    'servo_angle_min_deg',
+                    'servo_angle_max_deg',
+                    'pulse_min_us',
+                    'pulse_max_us',
+                    'joint_name',
+                    'joint_init_wait_ms',
+                    'joint_angle_init_deg',
+                    'joint_angle_min_deg',
+                    'joint_angle_max_deg'
                     ],
                    defaults=[
                        SERVO_QTY,
-                       'undefined',
-                       0.05,
+                       'DSSERVO,DS3235SG',
                        0,
                        180,
-                       90,
                        600,
-                       2400
+                       2400,
+                       None,
+                       50,
+                       90,
+                       0,
+                       180
                    ])
 
 
@@ -40,48 +73,55 @@ def servo_config() -> (List[Servo], dict, List[dict]):
     name_map = dict()
     servo_state_list = list()
     servo_list.append(Servo(channel=0,
-                            name='camera_pan',
-                            init_delay_s=0))
+                            joint_name='camera_pan',
+                            joint_init_wait_ms=0))
     servo_list.append(Servo(channel=1,
-                            name='camera_tilt',
-                            init_delay_s=1,
-                            angle_min_deg=50,
-                            pulse_max=2500))
+                            servo_make_model='TIANKONGRC,MG995',
+                            joint_name='camera_tilt',
+                            joint_init_wait_ms=1000,
+                            servo_angle_min_deg=50,
+                            pulse_max_us=2500))
     servo_list.append(Servo(channel=2,
-                            name='shoulder_pan',
-                            init_delay_s=0.3))
+                            joint_name='shoulder_pan',
+                            joint_init_wait_ms=300))
     servo_list.append(Servo(channel=3,
-                            name='shoulder_tilt',
-                            angle_init_deg=40,
-                            angle_max_deg=115))
+                            joint_name='shoulder_tilt',
+                            joint_angle_init_deg=40))
     servo_list.append(Servo(channel=4,
-                            name='elbow',
-                            angle_max_deg=60,
-                            angle_min_deg=5,
-                            angle_init_deg=5))
+                            joint_name='elbow',
+                            joint_angle_init_deg=90))
     servo_list.append(Servo(channel=5,
-                            name='wrist_pan',
-                            angle_init_deg=60))
+                            joint_name='wrist_pan',
+                            joint_angle_init_deg=60))
     servo_list.append(Servo(channel=6,
-                            name='wrist_tilt'))
+                            servo_make_model='TIANKONGRC,MG996R',
+                            joint_name='wrist_tilt'))
     servo_list.append(Servo(channel=7,
-                            name='gripper_pan'))
+                            servo_make_model='TIANKONGRC,MG995',
+                            joint_name='gripper_pan'))
     servo_list.append(Servo(channel=8,
-                            name='gripper',
-                            angle_max_deg=75,
-                            angle_init_deg=0))
-    servo_list.append(Servo(channel=9))
-    servo_list.append(Servo(channel=10))
-    servo_list.append(Servo(channel=11))
-    servo_list.append(Servo(channel=12))
-    servo_list.append(Servo(channel=13))
-    servo_list.append(Servo(channel=14))
-    servo_list.append(Servo(channel=15))
+                            joint_name='gripper',
+                            joint_angle_max_deg=75,
+                            joint_angle_init_deg=0))
+    servo_list.append(Servo(channel=9,
+                            servo_make_model=None))
+    servo_list.append(Servo(channel=10,
+                            servo_make_model=None))
+    servo_list.append(Servo(channel=11,
+                            servo_make_model=None))
+    servo_list.append(Servo(channel=12,
+                            servo_make_model=None))
+    servo_list.append(Servo(channel=13,
+                            servo_make_model=None))
+    servo_list.append(Servo(channel=14,
+                            servo_make_model=None))
+    servo_list.append(Servo(channel=15,
+                            servo_make_model=None))
 
     for servo in servo_list:
-        name_map[servo.name] = servo
+        name_map[servo.joint_name] = servo
         servo_state_list.append(
             {'enabled': False,
-             'angle': servo.angle_init_deg})
+             'angle': servo.joint_angle_init_deg})
 
     return servo_list, name_map, servo_state_list
