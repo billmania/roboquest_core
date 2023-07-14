@@ -3,6 +3,8 @@ from typing import Callable, Tuple
 import serial
 import RPi.GPIO as GPIO
 
+VERSION = 2
+
 READ_EOL = b'\r\n'
 READ_TIMEOUT_SEC = 0.2
 
@@ -131,6 +133,15 @@ class RQHAT(object):
         self._status_lines = list()
 
         self.status_msg('HAT setup')
+
+    def close(self):
+        """
+        Close the serial port and cleanup the GPIO. This method is not intended
+        for internal use.
+        """
+
+        self._hat.close()
+        GPIO.cleanup()
 
     def _open_hat_serial(self, port: str,
                          data_rate: int,

@@ -9,6 +9,8 @@ import json
 import docker
 from time import sleep
 
+from rq_hat import RQHAT
+
 """
 A utility script to manage the updating of RoboQuest docker images.
 It must be executing on the same host as the docker containers and
@@ -25,6 +27,15 @@ Files and directories:
     - systemd service with auto restart
 """
 
+VERSION = 4
+UPDATE_LOG = '/opt/updater/updater.log'
+UPDATE_FIFO = '/tmp/update_fifo'
+UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
+UPDATE_SCRIPT = 'updater.py'
+UPDATE_URL = 'http://registry.q4excellence.com:8079/' + UPDATE_SCRIPT
+LOOP_PERIOD_S = 10.0
+EOL = '\n'
+
 CONTAINERS = {
     'rq_core': {
         'image_name': 'registry.q4excellence.com:5678/rq_core',
@@ -40,15 +51,9 @@ CONTAINERS = {
         'image_name': 'registry.q4excellence.com:5678/rq_ui',
         'devices': [],
         'volumes': ['/dev/shm:/dev/shm',
+                    UPDATE_FIFO+':'+UPDATE_FIFO,
                     'ros_logs:/root/.ros/log']}
 }
-UPDATE_LOG = '/opt/updater/updater.log'
-UPDATE_FIFO = '/tmp/update_fifo'
-UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
-UPDATE_SCRIPT = 'http://registry.q4excellence.com:8079/updater.py'
-LOOP_PERIOD_S = 10.0
-EOL = '\n'
-VERSION = 3
 
 
 class RQUpdate(object):
@@ -129,9 +134,9 @@ class RQUpdate(object):
 
     def _requirements_met(self) -> bool:
         """
-        Confirm that electrical power and network connectivity
-        are available and appear stable.
+        Confirm network connectivity is available and appears stable.
         """
+        # TODO: Implement check for electrical
 
         result = True
 
@@ -141,8 +146,6 @@ class RQUpdate(object):
         else:
             logging.warning("Network connectivity requirements not met")
             result = False
-
-        # TODO: Implement check for electrical
 
         return result
 
@@ -158,11 +161,17 @@ class RQUpdate(object):
 
         self.close_fifo()
         logging.info(f'Replacing {VERSION} with {self._updater_version}')
+        try:
+            Path(UPDATE_SCRIPT).replace(UPDATE_SCRIPT+'.old')
 
-        response = get(UPDATE_SCRIPT, timeout=10.0)
+        except Exception:
+            pass
+
+        response = get(UPDATE_URL, timeout=10.0)
         if response.status_code == 200:
-            with open('updater.py', 'w') as f:
+            with open(UPDATE_SCRIPT, 'w') as f:
                 f.write(response.text)
+            Path(UPDATE_SCRIPT).chmod(0o554)
             logging.info('updater.py replaced')
             logging.warning('updater.py exiting')
             exit(0)
@@ -173,7 +182,9 @@ class RQUpdate(object):
     def _get_latest_images(self):
         """
         Allow the docker registry to determine if an image must be
-        pulled.
+        pulled. This method kills any running containers and then
+        instantiates the RQHAT() class, in order to use the screen
+        4 status display.
         """
 
         for container_name in CONTAINERS:
@@ -186,12 +197,24 @@ class RQUpdate(object):
             else:
                 container.kill()
 
+        self._hat = RQHAT(
+            '/dev/ttyS0',
+            38400,
+            7,
+            'N',
+            1,
+            1.0)
+        self._hat.status_msg(f'updating rq')
+
         self._client.containers.prune()
 
         for container_name in CONTAINERS:
+            self._hat.status_msg(f'checking {container_name}')
             image_name = CONTAINERS[container_name]['image_name']
             _ = self._client.images.pull(image_name)
             logging.info(f'Pulled image {image_name}')
+
+        self._hat.status_msg('rq up to date')
 
     def _update_images(self) -> None:
         """
@@ -205,15 +228,16 @@ class RQUpdate(object):
             self._get_latest_images()
             self._setup_fifo()
 
+            self._hat.status_msg('update complete')
+            self._hat.close()
+            self._hat = None
+
     def _process_message(self, message: str) -> None:
         """
         Process the message received from the UI.
 
-        The defined messages:
-
+        The defined message:
             {
-                timestamp: 1234567890,
-                version: 1
                 action: 'UPDATE',
                 args: ''
             }
