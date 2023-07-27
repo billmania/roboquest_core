@@ -17,6 +17,12 @@ from rq_msgs.msg import Telemetry
 from rq_msgs.msg import ServoAngles
 
 VERSION = 2
+#
+# These two SCALE values are almost completely arbitrary. They
+# should be tuned based on the top speed of the drive motors.
+#
+LINEAR_SCALE = 30.0
+ANGULAR_SCALE = 20.0
 
 
 class RQManage(RQNode):
@@ -91,17 +97,33 @@ class RQManage(RQNode):
                                       throttle_duration_sec=60)
             return
 
-        # TODO: Change this to debug
-        self.get_logger().info("motor_cb"
-                               f" linear_x: {msg.twist.linear.x}"
-                               f", angular_z: {msg.twist.angular.z}")
+        self.get_logger().debug("motor_cb"
+                                f" linear_x: {msg.twist.linear.x}"
+                                f", angular_z: {msg.twist.angular.z}")
 
-        # TODO: Change to only extract and convert the values
-        # TODO: Replace with a conversion of linear and angular to velocities
-        right_velocity = msg.twist.linear.x
-        left_velocity = msg.twist.angular.z
-        if not self._motors.set_motors_velocity(right=right_velocity,
-                                                left=left_velocity):
+        #
+        # The units for linear.x are meters per second and for angular.z
+        # are radians per second.
+        # The robot has a left and right motor commanded with units of
+        # percentage of maximim rotational velocity.
+        #
+        right_velocity = msg.twist.linear.x * LINEAR_SCALE
+        left_velocity = msg.twist.linear.x * LINEAR_SCALE
+
+        if msg.twist.angular.z > 0:
+            # left turn
+            right_velocity += (msg.twist.angular.z * ANGULAR_SCALE)
+            left_velocity -= (msg.twist.angular.z * ANGULAR_SCALE)
+        else:
+            # left turn
+            right_velocity -= (msg.twist.angular.z * ANGULAR_SCALE)
+            left_velocity += (msg.twist.angular.z * ANGULAR_SCALE)
+        self.get_logger().debug("motor_cb"
+                                f" right_velocity: {right_velocity}"
+                                f", left_velocity: {left_velocity}")
+
+        if not self._motors.set_motors_velocity(right=round(right_velocity),
+                                                left=round(left_velocity)):
             self.get_logger().warning("failed to set motors velocity")
 
     def _control_cb(self, request, response):
