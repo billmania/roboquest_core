@@ -274,8 +274,9 @@ $$SCREEN 1 0
 
     def charger_state(self) -> Tuple[bool, bool]:
         """
-        Return two booleans indicating if the battery is being charged and
-        if the charger is powered.
+        Return two booleans indicating if;
+            - the battery is being charged
+            - the charger has power
         """
 
         power_pin = GPIO.input(HAT_GPIO_PIN.CHARGER_POWERED.value)
