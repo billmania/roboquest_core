@@ -214,6 +214,8 @@ class RQManage(RQNode):
         telemetry_msg.adc4_v = float(fields[8])
         telemetry_msg.battery_charging, telemetry_msg.charger_has_power = \
             self._hat.charger_state()
+        telemetry_msg.motors_on = self._motors.motors_are_enabled()
+        telemetry_msg.servos_on = self._servos.controller_powered()
 
         self._telemetry_pub.publish(telemetry_msg)
 
