@@ -127,29 +127,38 @@ class RQManage(RQNode):
             self.get_logger().warning("failed to set motors velocity")
 
     def _control_cb(self, request, response):
-        response.success = True
+        """
+        Implement the control_hat service. Valid values for each
+        attribute of the interface are: ON and OFF. Any other value
+        is ignored.
+        """
+        self.get_logger().info('_control_cb'
+                               f' request: {request}')
 
-        if request.set_charger != 'IGNORE':
+        response.success = True
+        valid_values = ['ON', 'OFF']
+
+        if request.set_charger in valid_values:
             set_charger_on = True if request.set_charger == 'ON' \
                 else False
             self._hat.charger_control(set_charger_on)
 
-        if request.set_fet1 != 'IGNORE':
+        if request.set_fet1 in valid_values:
             set_fet1_on = True if request.set_fet1 == 'ON' \
                 else False
             self._hat.fet1_control(set_fet1_on)
 
-        if request.set_fet2 != 'IGNORE':
-            set_fet2_on = True if request.set_fet2 == 'ON' \
+        if request.set_fet2 in valid_values:
+            set_fet2_on = True if request.set_fet1 == 'ON' \
                 else False
             self._hat.fet2_control(set_fet2_on)
 
-        if request.set_motors != 'IGNORE':
+        if request.set_motors in valid_values:
             set_motors_on = True if request.set_motors == 'ON' \
                 else False
             self._motors.enable_motors(set_motors_on)
 
-        if request.set_servos != 'IGNORE':
+        if request.set_servos in valid_values:
             set_servos_on = True if request.set_servos == 'ON' \
                 else False
             self._servos.set_power(set_servos_on)

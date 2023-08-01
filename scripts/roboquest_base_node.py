@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from rclpy import init as ROS_init
+import rclpy.logging
 from roboquest_core.rq_manage import RQManage
 
 """
@@ -16,6 +17,9 @@ def run(node_name: str = 'roboquest_base_node'):
     """
 
     ROS_init(args=None)
+    rclpy.logging.set_logger_level(
+        node_name,
+        rclpy.logging.LoggingSeverity.DEBUG)
 
     rq_manage = RQManage(node_name)
     rq_manage.main()
