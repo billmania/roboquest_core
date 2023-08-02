@@ -174,11 +174,11 @@ class RQManage(RQNode):
         self._motor_sub = self.create_subscription(TwistStamped,
                                                    'cmd_vel',
                                                    self._motor_cb,
-                                                   1)
+                                                   5)
         self._servo_sub = self.create_subscription(ServoAngles,
                                                    'servos',
                                                    self._servo_cb,
-                                                   1)
+                                                   18)
         self._control_srv = self.create_service(Control,
                                                 'control_hat',
                                                 self._control_cb)
