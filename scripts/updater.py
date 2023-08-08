@@ -27,7 +27,8 @@ Files and directories:
     - systemd service with auto restart
 """
 
-VERSION = 4
+VERSION = 5
+DIRECTORIES = ['/opt/persist', '/opt/updater']
 UPDATE_LOG = '/opt/updater/updater.log'
 UPDATE_FIFO = '/tmp/update_fifo'
 UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
@@ -39,19 +40,22 @@ EOL = '\n'
 CONTAINERS = {
     'rq_core': {
         'image_name': 'registry.q4excellence.com:5678/rq_core',
+        'privileged': True,
         'devices': ['/dev/gpiomem:/dev/gpiomem:rwm',
                     '/dev/i2c-1:/dev/i2c-1:rwm',
                     '/dev/i2c-6:/dev/i2c-6:rwm',
-                    '/dev/ttyS0:/dev/ttyS0:rwm',
-                    '/dev/video0:/dev/video0:rwm'],
+                    '/dev/ttyS0:/dev/ttyS0:rwm'],
         'volumes': ['/dev/shm:/dev/shm',
                     '/var/run/dbus:/var/run/dbus',
+                    '/run/udev:/run/udev:ro',
                     'ros_logs:/root/.ros/log']},
     'rq_ui': {
         'image_name': 'registry.q4excellence.com:5678/rq_ui',
+        'privileged': False,
         'devices': [],
         'volumes': ['/dev/shm:/dev/shm',
                     UPDATE_FIFO+':'+UPDATE_FIFO,
+                    '/opt:/tmp/opt',
                     'ros_logs:/root/.ros/log']}
 }
 
@@ -66,10 +70,12 @@ class RQUpdate(object):
         Setup all of the stuff.
         """
 
+        self._make_dirs(DIRECTORIES)
         logging.basicConfig(
             filename=UPDATE_LOG,
             format='%(asctime)s %(levelname)s %(message)s',
             level=logging.INFO)
+        logging.info(f"updater.py version {VERSION} started")
 
         self._messages = list()
         self._client = None
@@ -181,10 +187,13 @@ class RQUpdate(object):
 
     def _get_latest_images(self):
         """
-        Allow the docker registry to determine if an image must be
-        pulled. This method kills any running containers and then
+        This method kills any running containers and then
         instantiates the RQHAT() class, in order to use the screen
         4 status display.
+        docker doesn't provide a means for getting a "newer" build of
+        an image. Instead, the short ID of the image on the registry
+        is retrieved and then compared to the local image. If they're
+        different, the image is pulled from the registry.
         """
 
         for container_name in CONTAINERS:
@@ -211,8 +220,26 @@ class RQUpdate(object):
         for container_name in CONTAINERS:
             self._hat.status_msg(f'checking {container_name}')
             image_name = CONTAINERS[container_name]['image_name']
-            _ = self._client.images.pull(image_name)
-            logging.info(f'Pulled image {image_name}')
+            try:
+                image_local = self._client.images.get(image_name)
+            except docker.errors.ImageNotFound:
+                image_local = None
+            image_registry = self._client.images.get_registry_data(image_name)
+            if not image_local:
+                logging.warning(
+                    f'Image {image_name}'
+                    ' No local image'
+                    f', registry {image_registry.short_id}')
+            else:
+                logging.info(
+                    f'Image {image_name}'
+                    f' local: {image_local.short_id}'
+                    f', registry {image_registry.short_id}')
+
+            if (not image_local
+                    or image_registry.short_id != image_local.short_id):
+                _ = self._client.images.pull(image_name)
+                logging.info(f'Pulled image {image_name}')
 
         self._hat.status_msg('rq up to date')
 
@@ -282,6 +309,7 @@ class RQUpdate(object):
                         image_name,
                         name=container_name,
                         detach=True,
+                        privileged=CONTAINERS[container_name]['privileged'],
                         auto_remove=True,
                         devices=CONTAINERS[container_name]['devices'],
                         ipc_mode='host',
@@ -323,6 +351,15 @@ class RQUpdate(object):
 
         if containers_to_start:
             self._start_containers(containers_to_start)
+
+    def _make_dirs(self, directories=[]) -> None:
+        """
+        Ensure the listed directories exist.
+        """
+
+        for directory in directories:
+            d = Path(directory)
+            d.mkdir(mode=0o775, exist_ok=True)
 
     def run(self) -> None:
 
