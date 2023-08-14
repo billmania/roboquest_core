@@ -29,7 +29,7 @@ Files and directories:
 
 VERSION = 5
 DIRECTORIES = ['/opt/persist', '/opt/updater']
-PERSIST_MNT = '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public'
+PERSIST_MNT = '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
 UPDATE_LOG = '/opt/updater/updater.log'
 UPDATE_FIFO = '/tmp/update_fifo'
 UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
