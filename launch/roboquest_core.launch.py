@@ -24,14 +24,31 @@ def generate_launch_description():
         respawn_delay=5
     )
 
+    # un-comment one camera and adjust the return statement below
+
+    #
+    # For the ArduCam/RasPiCam
+    #
     rq_camera_node = Node(
         name='rq_camera_node',
-        package="usb_cam",
-        executable="usb_cam_node_exe",
+        package="camera_ros",
+        executable="camera_node",
         parameters=[camera_params],
         respawn=True,
         respawn_delay=5
     )
+
+    #
+    # For a generic USB webcam
+    #
+    #rq_camera_node = Node(
+    #    name='rq_camera_node',
+    #    package="usb_cam",
+    #    executable="usb_cam_node_exe",
+    #    parameters=[camera_params],
+    #    respawn=True,
+    #    respawn_delay=5
+    #)
 
     return LaunchDescription([rq_base_node,
                               rq_camera_node
