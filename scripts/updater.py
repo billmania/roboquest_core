@@ -29,6 +29,7 @@ Files and directories:
 
 VERSION = 5
 DIRECTORIES = ['/opt/persist', '/opt/updater']
+PERSIST_MNT = '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public'
 UPDATE_LOG = '/opt/updater/updater.log'
 UPDATE_FIFO = '/tmp/update_fifo'
 UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
@@ -37,6 +38,10 @@ UPDATE_URL = 'http://registry.q4excellence.com:8079/' + UPDATE_SCRIPT
 LOOP_PERIOD_S = 10.0
 EOL = '\n'
 
+#
+# When this dictionary is modified, remember to update both dstart.sh
+# scripts.
+#
 CONTAINERS = {
     'rq_core': {
         'image_name': 'registry.q4excellence.com:5678/rq_core',
@@ -55,7 +60,7 @@ CONTAINERS = {
         'devices': [],
         'volumes': ['/dev/shm:/dev/shm',
                     UPDATE_FIFO+':'+UPDATE_FIFO,
-                    '/opt:/tmp/opt',
+                    '/opt/persist:'+PERSIST_MNT,
                     'ros_logs:/root/.ros/log']}
 }
 

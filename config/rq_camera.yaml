@@ -1,8 +1,12 @@
 /**:
   ros__parameters:
-    name: "camera_node"
-    framerate: 3.0
-    video_device: /dev/video0
-    brightness: 128
-    contrast: 128
-    saturation: 128
+    height: 480
+    width: 640
+    role: still
+    qos_overrides:
+      /parameter_events:
+        publisher:
+          depth: 1
+          durability: volatile
+          history: keep_last
+          reliability: reliable

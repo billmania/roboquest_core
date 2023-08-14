@@ -24,13 +24,16 @@ def generate_launch_description():
         respawn_delay=5
     )
 
+    # un-comment one camera and adjust the return statement below
+
     #
     # For the ArduCam/RasPiCam
     #
-    rq_camera_node = Node(                                                                          
+    rq_camera_node = Node(
         name='rq_camera_node',
         package="camera_ros",
         executable="camera_node",
+        parameters=[camera_params],
         respawn=True,
         respawn_delay=5
     )

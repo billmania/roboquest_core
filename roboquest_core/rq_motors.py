@@ -46,9 +46,8 @@ class RQMotors(object):
 
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(MOTOR_ENABLE_PIN, GPIO.OUT)
-        # TODO: Change the default to disabled
-        GPIO.output(MOTOR_ENABLE_PIN, GPIO.HIGH)
-        self._motors_enabled = True
+        GPIO.output(MOTOR_ENABLE_PIN, GPIO.LOW)
+        self._motors_enabled = False
 
     def _setup_i2c(self) -> None:
         """
