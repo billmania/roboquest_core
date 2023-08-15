@@ -27,7 +27,7 @@ Files and directories:
     - systemd service with auto restart
 """
 
-VERSION = 5
+VERSION = 6
 DIRECTORIES = ['/opt/persist', '/opt/updater']
 PERSIST_MNT = '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
 UPDATE_LOG = '/opt/updater/updater.log'
@@ -195,10 +195,10 @@ class RQUpdate(object):
         This method kills any running containers and then
         instantiates the RQHAT() class, in order to use the screen
         4 status display.
-        docker doesn't provide a means for getting a "newer" build of
-        an image. Instead, the short ID of the image on the registry
-        is retrieved and then compared to the local image. If they're
-        different, the image is pulled from the registry.
+        Docker doesn't provide a mechanism to compare the version of a
+        local image to the version on a registry. The registry image
+        must be pulled and then compared via some user-defined version
+        identifier.
         """
 
         for container_name in CONTAINERS:
@@ -229,24 +229,40 @@ class RQUpdate(object):
                 image_local = self._client.images.get(image_name)
             except docker.errors.ImageNotFound:
                 image_local = None
-            image_registry = self._client.images.get_registry_data(image_name)
+
+            try:
+                logging.info(f"Pulling {image_name}")
+                self._hat.status_msg(f' on registry')
+                image_registry = self._client.images.pull(
+                    image_name,
+                    tag='latest')
+            except docker.errors.ImageNotFound:
+                image_registry = None
+
+            if not image_local and not image_registry:
+                logging.fatal(
+                    f'Image {image_name}'
+                    f", does not exist on the registry")
+                self._hat.status_msg(f' not available')
+                continue
+
             if not image_local:
-                logging.warning(
+                logging.info(
                     f'Image {image_name}'
                     ' No local image'
-                    f', registry {image_registry.short_id}')
+                    f", registry {image_registry.labels['version']}")
+            elif not image_registry:
+                logging.warning(
+                    f'Image {image_name}'
+                    f" local: {image_local.labels['version']}"
+                    ', No registry image')
             else:
                 logging.info(
                     f'Image {image_name}'
-                    f' local: {image_local.short_id}'
-                    f', registry {image_registry.short_id}')
+                    f" local: {image_local.labels['version']}"
+                    f", registry {image_registry.labels['version']}")
 
-            if (not image_local
-                    or image_registry.short_id != image_local.short_id):
-                _ = self._client.images.pull(image_name)
-                logging.info(f'Pulled image {image_name}')
-
-        self._hat.status_msg('rq up to date')
+        self._hat.status_msg('rq updated')
 
     def _update_images(self) -> None:
         """
@@ -260,6 +276,7 @@ class RQUpdate(object):
             self._get_latest_images()
             self._setup_fifo()
 
+            logging.info('update complete')
             self._hat.status_msg('update complete')
             self._hat.close()
             self._hat = None
