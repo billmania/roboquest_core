@@ -1,0 +1,11 @@
+[Unit]
+Description=Setup the unique RoboQuest hostname
+Before=network-pre.target
+
+[Service]
+Type-oneshot
+Restart=no
+ExecStart=/usr/local/roboquest/hostname.bash
+
+[Install]
+WantedBy=network.target
