@@ -1,0 +1,13 @@
+[Unit]
+Description=Setup the RoboQuest WiFi Access Point
+Wants=network-online.target
+After=network-online.target network.target
+
+[Service]
+Type=oneshot
+Restart=no
+ExecStart=/usr/local/roboquest/access_point.bash
+
+[Install]
+Wants=NetworkManager.service
+WantedBy=default.target
