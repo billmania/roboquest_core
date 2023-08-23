@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     name: "roboquest_base_node"
-    hat_port: "/dev/ttyS0"
+    hat_port: "/dev/ttyAMA1"
     hat_data_rate: 38400
     hat_data_bits: 7
     hat_parity: 'N'
