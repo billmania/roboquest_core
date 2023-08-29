@@ -174,9 +174,10 @@ class RQServos(object):
                                     angle,
                                     servo.joint_angle_max_deg)
 
-            angle = self._slow_motion(
-                self._servos_state[servo.channel]['angle'],
-                angle)
+            #
+            # This is the spot where the _slow_motion() method could be
+            # inserted.
+            #
 
             pulse_duration_ms = self._translate(
                 angle,
