@@ -227,9 +227,12 @@ class RQServos(object):
                 # angle so the following call may cause high acceleration
                 # of the servo angle.
                 #
-                self.set_servo_angle(
-                    channel,
-                    servo.joint_angle_init_deg)
+                try:
+                    self.set_servo_angle(
+                        channel,
+                        servo.joint_angle_init_deg)
+                except TranslateError:
+                    pass
             else:
                 self.disable_servo(channel)
 
