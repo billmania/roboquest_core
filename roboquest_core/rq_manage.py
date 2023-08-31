@@ -8,7 +8,7 @@ from geometry_msgs.msg import TwistStamped
 from roboquest_core.rq_node import RQNode
 from roboquest_core.rq_hat import RQHAT
 from roboquest_core.rq_motors import RQMotors
-from roboquest_core.rq_servos import RQServos
+from roboquest_core.rq_servos import RQServos, TranslateError
 from roboquest_core.rq_network import RQNetwork
 from roboquest_core.rq_hat import TELEM_HEADER, SCREEN_HEADER
 from roboquest_core.rq_hat import HAT_SCREEN, HAT_BUTTON
@@ -83,7 +83,13 @@ class RQManage(RQNode):
 
         # TODO: Refactor this into putting the commands in a queue
         for servo in msg.servos:
-            self._servos.set_servo_angle(servo.name, servo.angle)
+            try:
+                self._servos.set_servo_angle(servo.name, servo.angle)
+
+            except TranslateError as e:
+                self.get_logger().warning(
+                    f"set_servo_angle: {e}",
+                    throttle_duration_sec=60)
 
     def _motor_cb(self, msg: TwistStamped):
         """
