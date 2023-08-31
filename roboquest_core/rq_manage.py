@@ -2,6 +2,7 @@ from typing import List
 from rclpy.parameter import Parameter
 from rclpy import spin_once as ROSspin_once
 from rclpy import shutdown as ROSshutdown
+import rclpy.logging
 import diagnostic_msgs
 from geometry_msgs.msg import TwistStamped
 
@@ -37,6 +38,9 @@ class RQManage(RQNode):
     def __init__(self,
                  node_name: str = 'RQManage'):
         super().__init__(node_name)
+        rclpy.logging.set_logger_level(
+            node_name,
+            rclpy.logging.LoggingSeverity.DEBUG)
         self._setup_parameters()
 
         self._telem_sentences = 0
@@ -180,11 +184,11 @@ class RQManage(RQNode):
         self._motor_sub = self.create_subscription(TwistStamped,
                                                    'cmd_vel',
                                                    self._motor_cb,
-                                                   5)
+                                                   1)
         self._servo_sub = self.create_subscription(ServoAngles,
                                                    'servos',
                                                    self._servo_cb,
-                                                   18)
+                                                   1)
         self._control_srv = self.create_service(Control,
                                                 'control_hat',
                                                 self._control_cb)
