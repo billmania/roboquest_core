@@ -27,7 +27,8 @@ Files and directories:
     - systemd service with auto restart
 """
 
-VERSION = 6
+VERSION = 7
+HAT_SERIAL = '/dev/ttyAMA1'
 DIRECTORIES = ['/opt/persist', '/opt/updater']
 PERSIST_MNT = '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
 UPDATE_LOG = '/opt/updater/updater.log'
@@ -41,6 +42,8 @@ EOL = '\n'
 #
 # When this dictionary is modified, remember to update both dstart.sh
 # scripts.
+# Because the rq_core container is run in privileged mode, the inclusion
+# of the devices list is superfluous.
 #
 CONTAINERS = {
     'rq_core': {
@@ -49,7 +52,7 @@ CONTAINERS = {
         'devices': ['/dev/gpiomem:/dev/gpiomem:rwm',
                     '/dev/i2c-1:/dev/i2c-1:rwm',
                     '/dev/i2c-6:/dev/i2c-6:rwm',
-                    '/dev/ttyS0:/dev/ttyS0:rwm'],
+                    HAT_SERIAL+':'+HAT_SERIAL+':rwm'],
         'volumes': ['/dev/shm:/dev/shm',
                     '/var/run/dbus:/var/run/dbus',
                     '/run/udev:/run/udev:ro',
@@ -212,7 +215,7 @@ class RQUpdate(object):
                 container.kill()
 
         self._hat = RQHAT(
-            '/dev/ttyS0',
+            HAT_SERIAL,
             38400,
             7,
             'N',
