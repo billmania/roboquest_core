@@ -1,4 +1,5 @@
 from typing import Callable
+from re import sub as resub
 import subprocess
 
 from roboquest_core.rq_hat import HAT_SCREEN, HAT_BUTTON, EOL
@@ -248,7 +249,8 @@ class RQNetwork(object):
         output = self._pad_line(f"Name: {connection['DEVICE']}")
         if connection_type == 'active':
             try:
-                output += self._pad_line(f"IP: {connection['IP4.ADDRESS[1]']}")
+                ip_address = resub('/\d*$', '', connection['IP4.ADDRESS[1]'])
+                output += self._pad_line(f"IP: {ip_address}")
             except Exception as e:
                 self._logger(f"IP Exception {e}")
 
