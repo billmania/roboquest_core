@@ -23,7 +23,7 @@ Here, the procedure for defining a new WiFi client Connection is described.
     11. Choose Back, Quit, then OK
 4. Go to HAT UI screen 3 and find your SSID
 5. Disconnect your ssh session
-6. Go to HAT UI screen 2 and disable any Connection using the WiFi interface
-7. If your new WiFi connection still appears on screen 3, press the Enter key
-8. Verify your new WiFi connection now appears on HAT UI screen 2
+6. Go to HAT UI screen 2 and disable (press Enter) any WiFi Connection(s)
+7. If the new WiFi connection still appears on screen 3, press the Enter key
+8. Verify the new WiFi connection appears on HAT UI screen 2
 
