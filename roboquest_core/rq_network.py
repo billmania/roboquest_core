@@ -116,12 +116,13 @@ class RQNetwork(object):
         self._active_connections = list()
 
         #
-        # returns
-        # b'roboAP:17740ed8-bf37-4a03-b178-d72652d0e20c:802-11-wireless\
-        #  :yes:wlan0\nWired connection 1:d27158e3-5b00-3cd2-9021-aef1d\
-        #  a5134c6:802-3-ethernet:yes:eth0\ndocker0:9792665e-73b3-4ca3-\
-        #  8d8b-70039a4e58a5:bridge:yes:docker0\nVCS:a06b74f5-f6a2-49bf\
-        #  -81a1-9dd555a00b73:802-11-wireless:no:\n'
+        # An example with each type:
+        #
+        # Wired:d27158e3-5b00-3cd2-9021-aef1da5134c6:802-3-ethernet:yes:eth0
+        # docker0:cfe56e1f-bccf-4fc1-a321-6affad222051:bridge:yes:docker0
+        # ManiaLabsGuest:deb8312d-cd47-4e14-8928-434fb9f9a55c:802-11-wireless:no:
+        # roboAP:17740ed8-bf37-4a03-b178-d72652d0e20c:802-11-wireless:no:
+        # VCS:a06b74f5-f6a2-49bf-81a1-9dd555a00b73:802-11-wireless:no:
         #
         output = subprocess.run(
             [NMCLI, '-c', 'no', '-t',
@@ -200,10 +201,13 @@ class RQNetwork(object):
             return self._pad_line('No active connections')
 
         index = page % self._active_count
+        #
+        # Save this active connection in case it's to be deactivated.
+        #
         self._connection_to_deactivate = self._active_connections[index]
 
         output = self._format_details(
-            self._connection_to_deactivate,
+            self._active_connections[index],
             index,
             'active')
 
@@ -221,10 +225,13 @@ class RQNetwork(object):
             return self._pad_line('No inactive connections')
 
         index = page % self._inactive_count
+        #
+        # Save this inactive connection in case it's to be activated.
+        #
         self._connection_to_activate = self._inactive_connections[index]
 
         output = self._format_details(
-            self._connection_to_activate,
+            self._inactive_connections[index],
             index,
             'inactive')
 
@@ -240,16 +247,17 @@ class RQNetwork(object):
         Accept a connection as input. Extract the details and format
         them suitable for display on the HAT UI. If include_IP
         is True, include the IP address in the output.
-
-        Format the device name, SSID and PSK (if exists), mode,
-        and strength.
         """
-        # TODO: Clarify what strength is supposed to be.
 
-        output = self._pad_line(f"Name: {connection['DEVICE']}")
+        output = ''
+
         if connection_type == 'active':
             try:
-                ip_address = resub('/\d*$', '', connection['IP4.ADDRESS[1]'])
+                output += self._pad_line(f"Dev: {connection['DEVICE']}")
+                ip_address = resub(
+                    '/\d*$',
+                    '',
+                    connection['IP4.ADDRESS[1]'])  # noqa: W605
                 output += self._pad_line(f"IP: {ip_address}")
             except Exception as e:
                 self._logger(f"IP Exception {e}")
@@ -269,7 +277,12 @@ class RQNetwork(object):
             output += self._pad_line(
                 f"Type: {connection['802-11-wireless.mode']}")
 
-        output = self._pad_line(f"{index + 1}/{connections_count}") + output
+        output = (
+            self._pad_line(
+                f"{index + 1}/{connections_count} {connection['NAME']}"
+            ) +
+            output
+        )
 
         return self._pad_text(output)
 
