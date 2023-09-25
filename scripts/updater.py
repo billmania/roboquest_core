@@ -27,9 +27,10 @@ Files and directories:
     - systemd service with auto restart
 """
 
-VERSION = 7
+VERSION = 8
 HAT_SERIAL = '/dev/ttyAMA1'
 DIRECTORIES = ['/opt/persist', '/opt/updater']
+SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
 PERSIST_MNT = '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
 UPDATE_LOG = '/opt/updater/updater.log'
 UPDATE_FIFO = '/tmp/update_fifo'
@@ -84,6 +85,9 @@ class RQUpdate(object):
             format='%(asctime)s %(levelname)s %(message)s',
             level=logging.INFO)
         logging.info(f"updater.py version {VERSION} started")
+
+        self._ros_domain_id = self._get_ros_domain_id()
+        logging.info(f'Set ROS domain: {self._ros_domain_id}')
 
         self._messages = list()
         self._client = None
@@ -308,6 +312,23 @@ class RQUpdate(object):
         else:
             logging.warning('Unrecognized command message: %s', message)
 
+    def _get_ros_domain_id(self):
+        """
+        Calculate an integer, between 1 and 101 inclusive, which is
+        unique across the universe of Raspberry Pi units. Return
+        the string ROS_DOMAIN_ID={integer}.
+        """
+        try:
+            with open(SERIAL_NUMBER_FILE, 'r') as serial_file:
+                cpuserial = serial_file.read()
+
+            logging.info(f'CPU serial {cpuserial[:-1]}')
+            return f'ROS_DOMAIN_ID={(int(cpuserial[:-1], base=16) % 100) + 1}'
+
+        except Exception:
+            logging.error('Failed to get CPU serial')
+            return 'ROS_DOMAIN_ID=0'
+
     def _start_containers(self, to_start: list) -> None:
         """
         Start the containers listed in to_start. If the image for any
@@ -334,6 +355,7 @@ class RQUpdate(object):
                         image_name,
                         name=container_name,
                         detach=True,
+                        environment=[self._ros_domain_id],
                         privileged=CONTAINERS[container_name]['privileged'],
                         auto_remove=True,
                         devices=CONTAINERS[container_name]['devices'],
