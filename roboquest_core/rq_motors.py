@@ -27,7 +27,7 @@ class RQMotors(object):
         """
 
         self._write_errors = 0
-        self._motor_max_speed = 100
+        self.set_motor_max_speed(100)
 
         self._setup_gpio()
         self._setup_i2c()
