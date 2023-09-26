@@ -13,6 +13,7 @@ docker run -d --rm \
         --privileged \
         --network host \
         --ipc host \
+        --env "ROS_DOMAIN_ID=72" \
         --device /dev/gpiomem:/dev/gpiomem \
         --device /dev/i2c-1:/dev/i2c-1 \
         --device /dev/i2c-6:/dev/i2c-6 \
