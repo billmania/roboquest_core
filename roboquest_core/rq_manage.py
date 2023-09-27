@@ -18,7 +18,7 @@ from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import ServoAngles
 
-VERSION = 3
+VERSION = 4
 #
 # These two SCALE values preserve the 0 to 100 speed control
 # values from the joystick.
