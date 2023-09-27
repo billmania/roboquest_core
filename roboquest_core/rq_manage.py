@@ -18,7 +18,7 @@ from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import ServoAngles
 
-VERSION = 4
+VERSION = 3
 #
 # These two SCALE values are almost completely arbitrary. They
 # should be tuned based on the top speed of the drive motors.
