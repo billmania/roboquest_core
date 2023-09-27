@@ -18,13 +18,14 @@ from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import ServoAngles
 
-VERSION = 3
+VERSION = 4
 #
-# These two SCALE values are almost completely arbitrary. They
-# should be tuned based on the top speed of the drive motors.
+# These two SCALE values preserve the 0 to 100 speed control
+# values from the joystick.
 #
-LINEAR_SCALE = 30.0
-ANGULAR_SCALE = 20.0
+# TODO: Replace with parameters which transform values to m/s and rad/s.
+LINEAR_SCALE = 1
+ANGULAR_SCALE = 0.5
 
 
 class RQManage(RQNode):
@@ -133,17 +134,19 @@ class RQManage(RQNode):
         # The robot has a left and right motor commanded with units of
         # percentage of maximim rotational velocity.
         #
-        right_velocity = msg.twist.linear.x * LINEAR_SCALE
-        left_velocity = msg.twist.linear.x * LINEAR_SCALE
+        linear_velocity = msg.twist.linear.x * LINEAR_SCALE
+        right_velocity = linear_velocity
+        left_velocity = linear_velocity
 
+        angular_velocity = abs(msg.twist.angular.z) * ANGULAR_SCALE
         if msg.twist.angular.z > 0:
             # left turn
-            right_velocity += (msg.twist.angular.z * ANGULAR_SCALE)
-            left_velocity -= (msg.twist.angular.z * ANGULAR_SCALE)
+            right_velocity += angular_velocity
+            left_velocity -= angular_velocity
         else:
             # left turn
-            right_velocity -= (msg.twist.angular.z * ANGULAR_SCALE)
-            left_velocity += (msg.twist.angular.z * ANGULAR_SCALE)
+            right_velocity -= angular_velocity
+            left_velocity += angular_velocity
         self.get_logger().debug("motor_cb"
                                 f" right_velocity: {right_velocity}"
                                 f", left_velocity: {left_velocity}")
