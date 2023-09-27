@@ -15,9 +15,10 @@ from roboquest_core.rq_hat import TELEM_HEADER, SCREEN_HEADER
 from roboquest_core.rq_hat import HAT_SCREEN, HAT_BUTTON
 from rq_msgs.srv import Control
 from rq_msgs.msg import Telemetry
+from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import ServoAngles
 
-VERSION = 2
+VERSION = 3
 #
 # These two SCALE values are almost completely arbitrary. They
 # should be tuned based on the top speed of the drive motors.
@@ -94,6 +95,21 @@ class RQManage(RQNode):
                 self.get_logger().warning(
                     f"set_servo_angle: {e}",
                     throttle_duration_sec=60)
+
+    def _motor_speed_cb(self, msg: MotorSpeed):
+        """
+        Set the maximum motor speed.
+        """
+
+        if not (1 <= msg.max_speed <= 100):
+            self.get_logger().error(
+                "motor_speed_cb"
+                f" max: {msg.max_speed} must be in [1, 100]")
+            return
+
+        self._motors.set_motor_max_speed(msg.max_speed)
+        self.get_logger().debug("motor_speed_cb"
+                                f" max: {msg.max_speed}")
 
     def _motor_cb(self, msg: TwistStamped):
         """
@@ -181,10 +197,16 @@ class RQManage(RQNode):
         """
 
         self._telemetry_pub = self.create_publisher(Telemetry, 'telemetry', 1)
-        self._motor_sub = self.create_subscription(TwistStamped,
-                                                   'cmd_vel',
-                                                   self._motor_cb,
-                                                   1)
+        self._motor_sub = self.create_subscription(
+            TwistStamped,
+            'cmd_vel',
+            self._motor_cb,
+            1)
+        self._motor_speed_sub = self.create_subscription(
+            MotorSpeed,
+            'motor_speed',
+            self._motor_speed_cb,
+            1)
         self._servo_sub = self.create_subscription(ServoAngles,
                                                    'servos',
                                                    self._servo_cb,
@@ -316,6 +338,7 @@ class RQManage(RQNode):
         while True:
             ROSspin_once(node=self, timeout_sec=0)
             sentence = self._hat.read_sentence()
+            ROSspin_once(node=self, timeout_sec=0)
 
             if sentence:
                 self._process_sentence(sentence)
