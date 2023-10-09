@@ -7,8 +7,10 @@ import diagnostic_msgs
 from geometry_msgs.msg import TwistStamped
 
 from roboquest_core.rq_node import RQNode
+from roboquest_core.rq_config_file import ConfigFile
 from roboquest_core.rq_hat import RQHAT
 from roboquest_core.rq_motors import RQMotors
+from roboquest_core.rq_servos_config import servo_config
 from roboquest_core.rq_servos import RQServos, TranslateError
 from roboquest_core.rq_network import RQNetwork
 from roboquest_core.rq_hat import TELEM_HEADER, SCREEN_HEADER
@@ -18,7 +20,7 @@ from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import ServoAngles
 
-VERSION = 4
+VERSION = 5
 #
 # These two SCALE values preserve the 0 to 100 speed control
 # values from the joystick.
@@ -26,6 +28,10 @@ VERSION = 4
 # TODO: Replace with parameters which transform values to m/s and rad/s.
 LINEAR_SCALE = 1
 ANGULAR_SCALE = 0.5
+
+PERSIST_BASE_DIR="/usr/src/ros2ws/install/roboquest_core/share/roboquest_core"
+PERSIST_DIR=PERSIST_BASE_DIR + '/' + "persist"
+SERVO_CONFIG = 'servos_config.json'
 
 
 class RQManage(RQNode):
@@ -66,8 +72,16 @@ class RQManage(RQNode):
             self._hat.pad_line,
             self._hat.pad_text)
         self._motors = RQMotors()
-        self._servos = RQServos()
-        # TODO: Figure out what sets this limit
+
+        #
+        # servo_config() provides a default servo configuration. It's
+        # expected to be called only if there isn't a servo configuration file
+        # in the persistent configuration directory.
+        #
+        self._servo_config = ConfigFile(PERSIST_DIR)
+        self._servo_config.init_config(SERVO_CONFIG, servo_config)
+        self._servos = RQServos(self._servo_config.get_config(SERVO_CONFIG))
+
         self._motors.set_motor_max_speed(100)
 
     def _servo_cb(self, msg: ServoAngles) -> None:
