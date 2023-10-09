@@ -1,10 +1,10 @@
-from typing import Union
+from typing import Union, List
 from time import sleep
 
 import smbus2
 
 import RPi.GPIO as GPIO
-from roboquest_core.rq_servos_config import servo_config
+from roboquest_core.rq_servos_config import servo_map_and_state
 
 SERVO_ENABLE_PIN = 23
 I2C_BUS_ID = 1
@@ -69,7 +69,7 @@ class RQServos(object):
     bus.
     """
 
-    def __init__(self):
+    def __init__(self, servos: List[dict]):
         """
         Setup communication with the servo sub-system. The PCA9685 I2C
         servo controller isn't configured until it's powered and then
@@ -78,7 +78,8 @@ class RQServos(object):
 
         self._write_errors = 0
 
-        self._servos, self._name_map, self._servos_state = servo_config()
+        self._servos = servos
+        self._name_map, self._servos_state = servo_map_and_state(self._servos)
         self._controller_powered = False
 
         self._setup_gpio()
@@ -161,18 +162,24 @@ class RQServos(object):
         """
 
         if isinstance(channel, str):
+            #
+            # In this case "channel" is actually the joint_name.
+            #
             servo = self._name_map[channel]
         else:
+            #
+            # And in this case, "channel" is the channel number.
+            #
             servo = self._servos[channel]
 
         if (self._controller_powered
-                and self._servos_state[servo.channel]['enabled']):
+                and self._servos_state[servo['channel']]['enabled']):
             if angle is None:
-                angle = self._servos_state[servo.channel]['angle']
+                angle = self._servos_state[servo['channel']]['angle']
 
-            angle = self._constrain(servo.joint_angle_min_deg,
+            angle = self._constrain(servo['joint_angle_min_deg'],
                                     angle,
-                                    servo.joint_angle_max_deg)
+                                    servo['joint_angle_max_deg'])
 
             #
             # This is the spot where the _slow_motion() method could be
@@ -181,10 +188,10 @@ class RQServos(object):
 
             pulse_duration_ms = self._translate(
                 angle,
-                servo.servo_angle_min_deg,
-                servo.servo_angle_max_deg,
-                servo.pulse_min_us,
-                servo.pulse_max_us)
+                servo['servo_angle_min_deg'],
+                servo['servo_angle_max_deg'],
+                servo['pulse_min_us'],
+                servo['pulse_max_us'])
 
             pulse_off_count = self._translate(
                 pulse_duration_ms,
@@ -194,10 +201,10 @@ class RQServos(object):
                 MAX_COUNT)
 
             self._set_servo_pwm(
-                servo.channel,
+                servo['channel'],
                 PULSE_ON_COUNT,
                 round(pulse_off_count))
-            self._servos_state[servo.channel]['angle'] = angle
+            self._servos_state[servo['channel']]['angle'] = angle
 
             return angle
 
@@ -218,9 +225,9 @@ class RQServos(object):
             sleep(0.05)
 
         for servo in self._servos:
-            channel = servo.channel
+            channel = servo['channel']
 
-            if servo.joint_name:
+            if servo['joint_name']:
                 self._servos_state[channel]['enabled'] = True
                 #
                 # There isn't a way to know the servo's current
@@ -230,7 +237,7 @@ class RQServos(object):
                 try:
                     self.set_servo_angle(
                         channel,
-                        servo.joint_angle_init_deg)
+                        servo['joint_angle_init_deg'])
                 except TranslateError:
                     pass
             else:

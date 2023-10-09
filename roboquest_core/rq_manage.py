@@ -41,6 +41,10 @@ PERSIST_BASE_DIR="/usr/src/ros2ws/install/roboquest_core/share/roboquest_core"
 PERSIST_DIR=PERSIST_BASE_DIR + '/' + "persist"
 SERVO_CONFIG = 'servos_config.json'
 
+PERSIST_BASE_DIR="/usr/src/ros2ws/install/roboquest_core/share/roboquest_core"
+PERSIST_DIR=PERSIST_BASE_DIR + '/' + "persist"
+SERVO_CONFIG = 'servos_config.json'
+
 
 class RQManage(RQNode):
     """

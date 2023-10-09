@@ -1,6 +1,7 @@
 """
 Manage persistent configuration files.
 """
+from typing import Callable
 import pathlib
 from json import dumps, loads
 
@@ -28,14 +29,17 @@ class ConfigFile(object):
         if (not self._persist_dir_path.exists()
                 or not self._persist_dir_path.is_dir()):
             raise ConfigFileError(
-                f"${persist_dir} does not exist or is not a directory")
+                f"{persist_dir} does not exist or is not a directory")
 
-    def init_config(self, config_file_name: str, config_data: object) -> None:
+    def init_config(
+         self,
+         config_file_name: str,
+         get_default_data: Callable) -> None:
         """
         If config_file_name already exists in the persist_dir, return
         without changing anything. If it doesn't exist, interpret
         config_data as the object to save in the configuration file.
-        Create a file named config_name in the persist_dir, convert
+        Create a file named config_file_name in the persist_dir, convert
         config_data to a JSON string, and write it to the file.
         """
 
@@ -46,7 +50,7 @@ class ConfigFile(object):
         config_file_path.unlink(missing_ok=True)
         config_file_path.write_text(
             dumps(
-                config_data,
+                get_default_data(),
                 sort_keys=True,
                 indent=2)
         )
@@ -54,7 +58,8 @@ class ConfigFile(object):
     def get_config(self, config_file_name: str) -> object:
         """
         Get the contents of config_file_name and return it as an
-        object.
+        object. The config file is expected to exist in the persistent
+        directory.
         """
 
         config_file_path = self._persist_dir_path / config_file_name
