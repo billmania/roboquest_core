@@ -20,7 +20,7 @@ from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import ServoAngles
 
-VERSION = 5
+VERSION = 3
 #
 # These two SCALE values preserve the 0 to 100 speed control
 # values from the joystick.
@@ -28,6 +28,14 @@ VERSION = 5
 # TODO: Replace with parameters which transform values to m/s and rad/s.
 LINEAR_SCALE = 1
 ANGULAR_SCALE = 0.5
+
+PERSIST_BASE_DIR="/usr/src/ros2ws/install/roboquest_core/share/roboquest_core"
+PERSIST_DIR=PERSIST_BASE_DIR + '/' + "persist"
+SERVO_CONFIG = 'servos_config.json'
+
+PERSIST_BASE_DIR="/usr/src/ros2ws/install/roboquest_core/share/roboquest_core"
+PERSIST_DIR=PERSIST_BASE_DIR + '/' + "persist"
+SERVO_CONFIG = 'servos_config.json'
 
 PERSIST_BASE_DIR="/usr/src/ros2ws/install/roboquest_core/share/roboquest_core"
 PERSIST_DIR=PERSIST_BASE_DIR + '/' + "persist"
