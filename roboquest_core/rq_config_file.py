@@ -38,9 +38,11 @@ class ConfigFile(object):
         """
         If config_file_name already exists in the persist_dir, return
         without changing anything. If it doesn't exist, interpret
-        config_data as the object to save in the configuration file.
+        get_default_data as the function to create a default servo
+        configuration object.
         Create a file named config_file_name in the persist_dir, convert
-        config_data to a JSON string, and write it to the file.
+        the servo configuration object to a JSON string, and write it to
+        the file.
         """
 
         config_file_path = self._persist_dir_path / config_file_name
@@ -74,7 +76,9 @@ class ConfigFile(object):
     def save_config(self, config_file_name: str, config_data: object) -> None:
         """
         Archive the current config_file_name and save the config_data
-        in its place.
+        in its place. This method is currently only used for testing because
+        rq_core doesn't save an updated servo configuration file - rq_ui
+        does that.
         """
 
         self._archive_config(config_file_name)
