@@ -6,6 +6,7 @@
 
 IMAGE=$1
 NAME=rq_core
+PERSIST_DIR="/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist"
 
 printf "Starting %s on %s\n" "$IMAGE" $DOCKER_HOST
 
@@ -21,6 +22,7 @@ docker run -d --rm \
         -v /dev/shm:/dev/shm \
         -v /var/run/dbus:/var/run/dbus \
         -v /run/udev:/run/udev \
+        -v /opt/persist:${PERSIST_DIR} \
         -v ros_logs:/root/.ros/log \
         --name $NAME \
         "$IMAGE"
