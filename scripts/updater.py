@@ -27,11 +27,12 @@ Files and directories:
     - systemd service with auto restart
 """
 
-VERSION = 8
+VERSION = 9
 HAT_SERIAL = '/dev/ttyAMA1'
 DIRECTORIES = ['/opt/persist', '/opt/updater']
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
-PERSIST_MNT = '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
+RQ_CORE_PERSIST = '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist'
+RQ_UI_PERSIST = '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
 UPDATE_LOG = '/opt/updater/updater.log'
 UPDATE_FIFO = '/tmp/update_fifo'
 UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
@@ -57,6 +58,7 @@ CONTAINERS = {
         'volumes': ['/dev/shm:/dev/shm',
                     '/var/run/dbus:/var/run/dbus',
                     '/run/udev:/run/udev:ro',
+                    '/opt/persist:'+RQ_CORE_PERSIST,
                     'ros_logs:/root/.ros/log']},
     'rq_ui': {
         'image_name': 'registry.q4excellence.com:5678/rq_ui',
@@ -64,7 +66,7 @@ CONTAINERS = {
         'devices': [],
         'volumes': ['/dev/shm:/dev/shm',
                     UPDATE_FIFO+':'+UPDATE_FIFO,
-                    '/opt/persist:'+PERSIST_MNT,
+                    '/opt/persist:'+RQ_UI_PERSIST,
                     'ros_logs:/root/.ros/log']}
 }
 
