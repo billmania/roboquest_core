@@ -98,7 +98,10 @@ class RQManage(RQNode):
 
     def _exit_worker(self):
         """
-        Call the exit() function to terminate the node.
+        Call the exit() function to terminate the node. This method
+        of terminating the node does NOT perform a clean shutdown.
+        Any in-flight ROS publishes, subscribes, or service calls
+        may be incomplete.
         """
 
         self.get_logger().fatal("_exit_worker: Calling kill")
