@@ -1,4 +1,7 @@
 from typing import List
+from threading import Timer
+from os import kill, getpid
+from signal import SIGKILL
 from rclpy.parameter import Parameter
 from rclpy import spin_once as ROSspin_once
 from rclpy import shutdown as ROSshutdown
@@ -15,12 +18,13 @@ from roboquest_core.rq_servos import RQServos, TranslateError
 from roboquest_core.rq_network import RQNetwork
 from roboquest_core.rq_hat import TELEM_HEADER, SCREEN_HEADER
 from roboquest_core.rq_hat import HAT_SCREEN, HAT_BUTTON
+from std_srvs.srv import Empty
 from rq_msgs.srv import Control
 from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import ServoAngles
 
-VERSION = 4
+VERSION = 17
 #
 # These two SCALE values preserve the 0 to 100 speed control
 # values from the joystick.
@@ -28,6 +32,11 @@ VERSION = 4
 # TODO: Replace with parameters which transform values to m/s and rad/s.
 LINEAR_SCALE = 1
 ANGULAR_SCALE = 0.5
+
+#
+# How many seconds to wait before calling exit().
+#
+EXIT_DELAY_S = 5
 
 INSTALL_DIR = '/usr/src/ros2ws/install'
 PERSIST_BASE_DIR = INSTALL_DIR + '/roboquest_core/share/roboquest_core'
@@ -84,6 +93,19 @@ class RQManage(RQNode):
         self._servos = RQServos(self._servo_config.get_config(SERVO_CONFIG))
 
         self._motors.set_motor_max_speed(100)
+
+        self._exit_timer = Timer(EXIT_DELAY_S, self._exit_worker)
+
+    def _exit_worker(self):
+        """
+        Call the exit() function to terminate the node. This method
+        of terminating the node does NOT perform a clean shutdown.
+        Any in-flight ROS publishes, subscribes, or service calls
+        may be incomplete.
+        """
+
+        self.get_logger().fatal("_exit_worker: Calling kill")
+        kill(getpid(), SIGKILL)
 
     def _servo_cb(self, msg: ServoAngles) -> None:
         """
@@ -170,6 +192,20 @@ class RQManage(RQNode):
                                                 left=round(left_velocity)):
             self.get_logger().warning("failed to set motors velocity")
 
+    def _restart_cb(self, request, response):
+        """
+        Cause the node to exit, in order to have some other daemon
+        automatically restart it. This is usually done to load an
+        updated configuration.
+
+        In order for this callback to return a service response so
+        the caller doesn't hang, it uses a Timer to call exit().
+        """
+        self.get_logger().info('_restart_cb called')
+
+        self._exit_timer.start()
+        return response
+
     def _control_cb(self, request, response):
         """
         Implement the control_hat service. Valid values for each
@@ -232,6 +268,9 @@ class RQManage(RQNode):
         self._control_srv = self.create_service(Control,
                                                 'control_hat',
                                                 self._control_cb)
+        self._restart_srv = self.create_service(Empty,
+                                                'restart',
+                                                self._restart_cb)
 
     def _setup_parameters(self):
         parameter_declarations = [
