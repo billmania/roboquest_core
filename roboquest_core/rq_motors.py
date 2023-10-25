@@ -5,6 +5,7 @@ import smbus2
 
 import RPi.GPIO as GPIO
 
+MAX_MOTOR_RPM = 300
 MOTOR_ENABLE_PIN = 17
 I2C_BUS_ID = 6
 I2C_DEVICE_ID = 0x53
@@ -27,17 +28,17 @@ class RQMotors(object):
         """
 
         self._write_errors = 0
-        self.set_motor_max_speed(100)
+        self.set_motor_max_rpm(MAX_MOTOR_RPM)
 
         self._setup_gpio()
         self._setup_i2c()
 
-    def set_motor_max_speed(self, max_speed: int) -> None:
+    def set_motor_max_rpm(self, max_rpm: int) -> None:
         """
-        Set the maximum speed of the motors as a positive percentage.
+        Set the maximum RPM of the motors as a positive value.
         """
 
-        self._motor_max_speed = max_speed
+        self._motor_max_rpm = max_rpm
 
     def _setup_gpio(self) -> None:
         """
@@ -77,31 +78,29 @@ class RQMotors(object):
             GPIO.output(MOTOR_ENABLE_PIN, GPIO.LOW)
             self._motors_enabled = False
 
-    def _pack_speed(self, speed: int) -> bytes:
+    def _pack_rpm(self, rpm: int) -> bytes:
         """
         Pack a 4 byte signed integer into 4 bytes, little-endian.
         """
 
-        return pack('<i', speed)
+        return pack('<i', rpm)
 
-    def _constrain_speed(self, speed: int) -> int:
+    def _constrain_rpm(self, rpm: int) -> int:
         """
-        Constrain speed to be in
-        [-self._motor_max_speed, self._motor_max_speed], clipping speed
+        Constrain RPM to be in
+        [-self._motor_max_rpm, self._motor_max_rpm], clipping rpm
         if it is not.
         """
 
-        return max(min(int(speed),
-                       self._motor_max_speed),
-                   -self._motor_max_speed)
+        return max(min(int(rpm),
+                       self._motor_max_rpm),
+                   -self._motor_max_rpm)
 
-    def set_motors_velocity(self, right: int = 0, left: int = 0) -> bool:
+    def set_motors_rpm(self, right: int = 0, left: int = 0) -> bool:
         """
         An open loop control for the velocity of each drive motor.
-        right and left are the percentage of full power to apply
-        to each motor. A positive percentage indicates the forward
-        rotation. Values outside the range [-100, 100] will be
-        clipped.
+        right and left are the RPM to set for each motor. A positive
+        value indicates the forward rotation.
 
         The velocity of the right motor is always set first, which
         will likely have an impact on the robot's motion.
@@ -118,12 +117,12 @@ class RQMotors(object):
                 self._bus.write_i2c_block_data(
                     I2C_DEVICE_ID,
                     I2C_MOTOR_RIGHT_REGISTER,
-                    list(self._pack_speed(self._constrain_speed(right)))
+                    list(self._pack_rpm(self._constrain_rpm(right)))
                 )
                 self._bus.write_i2c_block_data(
                     I2C_DEVICE_ID,
                     I2C_MOTOR_LEFT_REGISTER,
-                    list(self._pack_speed(self._constrain_speed(left)))
+                    list(self._pack_rpm(self._constrain_rpm(left)))
                 )
 
                 return True
