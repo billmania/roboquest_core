@@ -12,7 +12,7 @@ from geometry_msgs.msg import TwistStamped
 from roboquest_core.rq_node import RQNode
 from roboquest_core.rq_config_file import ConfigFile
 from roboquest_core.rq_hat import RQHAT
-from roboquest_core.rq_motors import RQMotors
+from roboquest_core.rq_motors import RQMotors, MAX_MOTOR_RPM
 from roboquest_core.rq_servos_config import servo_config
 from roboquest_core.rq_servos import RQServos, TranslateError
 from roboquest_core.rq_network import RQNetwork
@@ -24,14 +24,19 @@ from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import ServoAngles
 
-VERSION = 17
+VERSION = 18
+
+JOYSTICK_MAX = 100
 #
-# These two SCALE values preserve the 0 to 100 speed control
-# values from the joystick.
+# These two SCALE values scale the input command values, which usually
+# come from a joystick, to the actual range of motor RPM. The input
+# commands are assumed to be in the range [-JOYSTICK_MAX, JOYSTICK_MAX].
+# This scaling happens before the motor RPM is constrained by a max
+# motor RPM setting.
 #
-# TODO: Replace with parameters which transform values to m/s and rad/s.
-LINEAR_SCALE = 1
-ANGULAR_SCALE = 0.5
+# TODO: Replace with parameters which transform input values to m/s and rad/s.
+LINEAR_SCALE = MAX_MOTOR_RPM / JOYSTICK_MAX
+ANGULAR_SCALE = LINEAR_SCALE / 2
 
 #
 # How many seconds to wait before calling exit().
@@ -92,8 +97,6 @@ class RQManage(RQNode):
         self._servo_config.init_config(SERVO_CONFIG, servo_config)
         self._servos = RQServos(self._servo_config.get_config(SERVO_CONFIG))
 
-        self._motors.set_motor_max_speed(100)
-
         self._exit_timer = Timer(EXIT_DELAY_S, self._exit_worker)
 
     def _exit_worker(self):
@@ -139,20 +142,20 @@ class RQManage(RQNode):
         Set the maximum motor speed.
         """
 
-        if not (1 <= msg.max_speed <= 100):
+        if not (0 <= msg.max_rpm <= MAX_MOTOR_RPM):
             self.get_logger().error(
                 "motor_speed_cb"
-                f" max: {msg.max_speed} must be in [1, 100]")
+                f" max: {msg.max_rpm} must be in [0, {MAX_MOTOR_RPM}]")
             return
 
-        self._motors.set_motor_max_speed(msg.max_speed)
+        self._motors.set_motor_max_rpm(msg.max_rpm)
         self.get_logger().debug("motor_speed_cb"
-                                f" max: {msg.max_speed}")
+                                f" max: {msg.max_rpm}")
 
     def _motor_cb(self, msg: TwistStamped):
         """
         Extract the linear.x and angular.z from the Twist message,
-        convert it to an x and y velocity, and pass it to the
+        convert it to an x and y RPM, and pass it to the
         motors controller.
         """
 
@@ -172,8 +175,7 @@ class RQManage(RQNode):
         # percentage of maximim rotational velocity.
         #
         linear_velocity = msg.twist.linear.x * LINEAR_SCALE
-        right_velocity = linear_velocity
-        left_velocity = linear_velocity
+        right_velocity = left_velocity = linear_velocity
 
         angular_velocity = abs(msg.twist.angular.z) * ANGULAR_SCALE
         if msg.twist.angular.z > 0:
@@ -188,9 +190,9 @@ class RQManage(RQNode):
                                 f" right_velocity: {right_velocity}"
                                 f", left_velocity: {left_velocity}")
 
-        if not self._motors.set_motors_velocity(right=round(right_velocity),
-                                                left=round(left_velocity)):
-            self.get_logger().warning("failed to set motors velocity")
+        if not self._motors.set_motors_rpm(right=round(right_velocity),
+                                           left=round(left_velocity)):
+            self.get_logger().warning("failed to set motors RPM")
 
     def _restart_cb(self, request, response):
         """
