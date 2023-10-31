@@ -27,12 +27,14 @@ Files and directories:
     - systemd service with auto restart
 """
 
-VERSION = 9
+VERSION = 10
 HAT_SERIAL = '/dev/ttyAMA1'
-DIRECTORIES = ['/opt/persist', '/opt/updater']
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
 RQ_CORE_PERSIST = '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist'
 RQ_UI_PERSIST = '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
+OS_PERSIST = '/opt/persist'
+DIRECTORIES = [OS_PERSIST, '/opt/updater']
+CONFIG_FILES = ['configuration.json']
 UPDATE_LOG = '/opt/updater/updater.log'
 UPDATE_FIFO = '/tmp/update_fifo'
 UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
@@ -410,6 +412,67 @@ class RQUpdate(object):
             d = Path(directory)
             d.mkdir(mode=0o775, exist_ok=True)
 
+    def _restore_config(self, config_file: str) -> None:
+        """
+        Restore config_file with its old version, if the old version
+        exists.
+        """
+
+        logging.info(f"Attempting to restore {config_file}")
+        config_file_path = Path(OS_PERSIST) / config_file
+        old_config_file_path = Path(OS_PERSIST) / (config_file + '.old')
+
+        if old_config_file_path.exists():
+            try:
+                config_file_path.unlink(missing_ok=True)
+                old_config_file_path.rename(config_file_path)
+                logging.info(f"{config_file} restored from old version")
+
+            except Exception as e:
+                logging.warn(f"Failed to restore {config_file}: {e}")
+        else:
+            logging.warn(f"Old version of {config_file} does not exist")
+
+        return
+
+    def _check_configs(self, restore: bool = False) -> None:
+        """
+        Monitor configuration files for:
+            1. missing
+            2. empty
+            3. corrupt
+        When any of those conditions exist, log the occurence.
+        If restore is True, attempt to restore the config file
+        with the old version.
+        Uses CONFIG_FILES for a list of configuration file base
+        names to be found in OS_PERSIST directory. The configuration
+        files must be JSON strings and must have the "version"
+        attribute at their top level.
+        """
+
+        for config_file in CONFIG_FILES:
+            config_file_path = Path(OS_PERSIST) / config_file
+
+            if config_file_path.exists():
+                if config_file_path.stat().st_size > 0:
+                    configuration = json.loads(config_file_path.read_text())
+                    if 'version' in configuration:
+                        continue
+                    else:
+                        logging.warning(f"{config_file}"
+                                        " missing version attribute")
+                else:
+                    logging.warning(f"{config_file}"
+                                    " is empty")
+            else:
+                logging.warning(f"{config_file}"
+                                " does not exist")
+
+            if restore:
+                self._restore_config(config_file)
+
+        return
+
     def run(self) -> None:
 
         """
@@ -417,8 +480,11 @@ class RQUpdate(object):
         a command to update the containers.
         """
 
+        self._check_configs(restore=True)
+
         while True:
             self._check_running_containers()
+            self._check_configs(restore=False)
 
             message = self.read_message()
             if message:
