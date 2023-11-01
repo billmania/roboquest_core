@@ -8,6 +8,7 @@ import logging
 import json
 import docker
 from time import sleep
+import RPi.GPIO as GPIO
 
 from rq_hat import RQHAT
 
@@ -27,8 +28,9 @@ Files and directories:
     - systemd service with auto restart
 """
 
-VERSION = 10
+VERSION = 11
 HAT_SERIAL = '/dev/ttyAMA1'
+SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
 RQ_CORE_PERSIST = '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist'
 RQ_UI_PERSIST = '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
@@ -100,8 +102,23 @@ class RQUpdate(object):
 
         self._fifo_path = fifo_path
 
+        self._setup_shutdown()
         self._setup_docker()
         self._setup_fifo()
+
+    def _setup_shutdown(self):
+        """
+        Setup the callback to call when the shutdown hardware
+        signal is detected.
+        """
+
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(SHUTDOWN_PIN, GPIO.IN)
+        GPIO.add_event_detect(
+            SHUTDOWN_PIN,
+            GPIO.BOTH,
+            callback=self._shutdown_cb
+        )
 
     def _setup_docker(self):
         """
@@ -416,6 +433,12 @@ class RQUpdate(object):
         """
         Restore config_file with its old version, if the old version
         exists.
+        In the special case where neither the config file nor its
+        old version exists, the condition will be logged but nothing
+        else will be done. This case occurs once with a
+        never-before-used RoboQuest SD image OR after a catastrophic
+        failure. In either event, a restart of the robot will cause
+        the rq_ui container to install a default config file.
         """
 
         logging.info(f"Attempting to restore {config_file}")
@@ -491,6 +514,24 @@ class RQUpdate(object):
                 self._process_message(message)
             else:
                 sleep(LOOP_PERIOD_S)
+
+    def _shutdown_cb(self, arg):
+        """
+        Called when the shutdown control signal has been detected.
+        """
+
+        logging.info(f"Shutdown triggered via pin {arg}")
+        os.system('systemctl halt')
+        logging.info('Shutdown command issued')
+
+        #
+        # Pause here for a bit, so updater.py doesn't try
+        # to restart the containers after the OS is trying
+        # to stop the docker daemon.
+        #
+        LONG_TIME = 60
+        sleep(LONG_TIME)
+        logging.warn('Woke unexpectedly from sleep')
 
 
 if __name__ == "__main__":
