@@ -14,7 +14,8 @@ from roboquest_core.rq_config_file import ConfigFile
 from roboquest_core.rq_hat import RQHAT
 from roboquest_core.rq_motors import RQMotors, MAX_MOTOR_RPM
 from roboquest_core.rq_servos_config import servo_config
-from roboquest_core.rq_servos import RQServos, TranslateError
+from roboquest_core.rq_servos import RQServos
+from roboquest_core.rq_servos import TranslateError, ServoError
 from roboquest_core.rq_network import RQNetwork
 from roboquest_core.rq_hat import TELEM_HEADER, SCREEN_HEADER
 from roboquest_core.rq_hat import HAT_SCREEN, HAT_BUTTON
@@ -24,7 +25,7 @@ from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import ServoAngles
 
-VERSION = 18
+VERSION = 19
 
 JOYSTICK_MAX = 100
 #
@@ -134,7 +135,12 @@ class RQManage(RQNode):
 
             except TranslateError as e:
                 self.get_logger().warning(
-                    f"set_servo_angle: {e}",
+                    f"_servo_cb: {e}",
+                    throttle_duration_sec=60)
+
+            except ServoError as e:
+                self.get_logger().warning(
+                    f"_servo_cb: {e}",
                     throttle_duration_sec=60)
 
     def _motor_speed_cb(self, msg: MotorSpeed):

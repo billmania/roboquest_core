@@ -5,6 +5,7 @@ import smbus2
 
 import RPi.GPIO as GPIO
 from roboquest_core.rq_servos_config import servo_map_and_state
+from roboquest_core.rq_servos_config import SERVO_QTY
 
 SERVO_ENABLE_PIN = 23
 I2C_BUS_ID = 1
@@ -45,6 +46,14 @@ MODE1_VALUE = 0x00
 SETUPS = [(MODE2_REG, OUTDRV_VALUE),
           (PRESCALE_REG, PRESCALE_VALUE),
           (MODE1_REG, MODE1_VALUE)]
+
+
+class ServoError(Exception):
+    """
+    General errors with servos.
+    """
+
+    pass
 
 
 class TranslateError(Exception):
@@ -151,6 +160,9 @@ class RQServos(object):
                         channel: Union[int, str],
                         angle: int = None) -> int:
         """
+        Servos can be identified by: a string name; a string representation
+        of the channel number; or an integer channel number.
+
         For servo channel set its angle. If no angle is provided, set
         the default angle. The default is the previously set angle.
 
@@ -161,16 +173,23 @@ class RQServos(object):
         moved, after limiting the acceleration.
         """
 
-        if isinstance(channel, str):
-            #
-            # In this case "channel" is actually the joint_name.
-            #
-            servo = self._name_map[channel]
-        else:
-            #
-            # And in this case, "channel" is the channel number.
-            #
-            servo = self._servos[channel]
+        try:
+            channel_number = int(channel)
+            if 0 <= channel_number < SERVO_QTY:
+                servo = self._servos[channel_number]
+            else:
+                raise ServoError(
+                    f"set_servo_angle: {channel_number} must be"
+                    f" between 0 and {SERVO_QTY}"
+                )
+
+        except ValueError:
+            if channel in self._name_map:
+                servo = self._name_map[channel]
+            else:
+                raise ServoError(
+                    f"set_servo_angle: {channel} not a recognized servo name"
+                )
 
         if (self._controller_powered
                 and self._servos_state[servo['channel']]['enabled']):
