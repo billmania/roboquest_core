@@ -28,7 +28,7 @@ Files and directories:
     - systemd service with auto restart
 """
 
-VERSION = 11
+VERSION = 12
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -104,6 +104,7 @@ class RQUpdate(object):
 
         self._setup_shutdown()
         self._setup_docker()
+        self._remove_old_images()
         self._setup_fifo()
 
     def _setup_shutdown(self):
@@ -532,6 +533,25 @@ class RQUpdate(object):
         LONG_TIME = 60
         sleep(LONG_TIME)
         logging.warn('Woke unexpectedly from sleep')
+
+    def _remove_old_images(self):
+        """
+        Intended for use only at startup, before any containers
+        have been started. Removes all old images, selected
+        with the "dangling" filter because they don't have a tag.
+        """
+
+        old_images = self._client.images.list(
+            filters={
+                'dangling': True
+            })
+
+        for image in old_images:
+            try:
+                self._client.images.remove(image=image.id)
+
+            except Exception as e:
+                logging.warning(f"Failed to remove old {image.id}: {e}")
 
 
 if __name__ == "__main__":
