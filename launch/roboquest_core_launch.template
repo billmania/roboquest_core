@@ -1,3 +1,8 @@
+"""
+This file is created by config_launch.py before ros2 launch
+is run.
+"""
+
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -28,11 +33,6 @@ def generate_launch_description():
         get_package_share_directory('roboquest_core'),
         'config',
         'usb_camera_C.yaml'
-    )
-    usb_camera_params_D = os.path.join(
-        get_package_share_directory('roboquest_core'),
-        'config',
-        'usb_camera_D.yaml'
     )
 
     rq_base_node = Node(
@@ -84,18 +84,6 @@ def generate_launch_description():
         parameters=[usb_camera_params_C],
         remappings=[
             ('/image_raw', '/image_C_raw'),
-        ],
-        respawn=True,
-        respawn_delay=15
-    )
-
-    usb_camera_node_D = Node(
-        name='usb_camera_node_D',
-        package="usb_cam",
-        executable="usb_cam_node_exe",
-        parameters=[usb_camera_params_D],
-        remappings=[
-            ('/image_raw', '/image_D_raw'),
         ],
         respawn=True,
         respawn_delay=15
