@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
-from find_cameras import write_cameras_file, find_cameras
 
 MAX_CSI = 1
 MAX_USB = 3
 PERSIST_DIR = '/tmp'
-# INSTALL_DIR = '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core'
-INSTALL_DIR = '/home/bill/projects/roboquest/ros2ws/src/roboquest_core'
+INSTALL_DIR = '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core'
+# INSTALL_DIR = '/home/bill/projects/roboquest/ros2ws/src/roboquest_core'
+PERSIST_DIR = '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist'
+CAMERAS_FILE = 'cameras_info'
 CONFIG_DIR = INSTALL_DIR + '/config'
 CSI_TEMPLATE = 'csi_camera_params.template'
 CSI_YAML = 'csi_camera.yaml'
@@ -30,17 +31,28 @@ class CameraConfig(object):
         self._cameras_list = None
         self._ids_to_launch = []
 
-        self._create_cameras_file()
+        #
+        # These two lists must have a length <= MAX_USB.
+        #
+        self._param_files = []
+        self._param_files.append('usb_camera_A.yaml')
+        self._param_files.append('usb_camera_B.yaml')
+        self._param_files.append('usb_camera_C.yaml')
+        self._usb_node_names = []
+        self._usb_node_names.append('usb_camera_node_A')
+        self._usb_node_names.append('usb_camera_node_B')
+        self._usb_node_names.append('usb_camera_node_C')
 
-    def _create_cameras_file(self) -> None:
+        self._get_cameras_file()
+
+    def _get_cameras_file(self) -> None:
         """
-        Use find_cameras to get the list of cameras. Use write_cameras_file
-        to write that list to a persisent file, so the browser UI will have
-        access to it.
+        Get the list of cameras from the file.
         """
 
-        self._cameras_list = find_cameras()
-        write_cameras_file(self._cameras_list, PERSIST_DIR)
+        cameras_file = Path(PERSIST_DIR) / CAMERAS_FILE
+        with open(cameras_file, 'r') as f:
+            self._cameras_list = f.read()
 
     def _create_csi_params(self) -> None:
         """
@@ -69,15 +81,13 @@ class CameraConfig(object):
         included in the launch file are contiguously named.
         """
 
-        param_files = []
-        param_files.append('usb_camera_A.yaml')
-        param_files.append('usb_camera_B.yaml')
-        param_files.append('usb_camera_C.yaml')
+        if len(self._param_files) == 0:
+            return
 
         template = Path(CONFIG_DIR) / USB_TEMPLATE
         with open(template, 'r') as f:
             self._usb_template = f.read()
-        usb_yaml = param_files.pop(0)
+        usb_yaml = self._param_files.pop(0)
         param_file = Path(CONFIG_DIR) / usb_yaml
         self._usb_template = self._usb_template.replace('%VIDEO_ID%', id)
         param_file.unlink(missing_ok=True)
@@ -94,10 +104,6 @@ class CameraConfig(object):
         camera nodes.
         """
 
-        usb_node_names = []
-        usb_node_names.append('usb_camera_node_A')
-        usb_node_names.append('usb_camera_node_B')
-        usb_node_names.append('usb_camera_node_C')
         nodes = ''
 
         csi_nodes = 0
@@ -107,7 +113,7 @@ class CameraConfig(object):
                 nodes += ', csi_camera_node'
                 csi_nodes += 1
             elif usb_nodes < MAX_USB:
-                nodes += ', ' + usb_node_names.pop(0)
+                nodes += ', ' + self._usb_node_names.pop(0)
                 usb_nodes += 1
 
         template = Path(LAUNCH_DIR) / LAUNCH_TEMPLATE
@@ -119,7 +125,7 @@ class CameraConfig(object):
         with open(launch_file, 'w') as f:
             f.write(launch_py)
 
-    def _process_camera_list(self) -> None:
+    def run(self):
         """
         Read the contents of the camera list, one entry at a time.
         Call the CSI or the USB setup as appropriate, keeping track
@@ -127,7 +133,11 @@ class CameraConfig(object):
         Finally, create an appropriate launch file.
         """
 
-        for camera in self._cameras_list:
+
+        for camera in self._cameras_list.split('\n'):
+            if camera == '':
+                break
+
             details = camera.split(',')
             id = details[0]
             name = details[1]
@@ -139,13 +149,6 @@ class CameraConfig(object):
                 self._create_usb_params(id)
 
         self._create_launch_file()
-
-    def run(self):
-        """
-        Create the parameter files and then the launch file.
-        """
-
-        self._process_camera_list()
 
 
 if __name__ == '__main__':

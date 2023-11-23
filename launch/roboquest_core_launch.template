@@ -19,7 +19,7 @@ def generate_launch_description():
         'config',
         'csi_camera.yaml'
     )
-    usb_camera_params_A os.path.join(
+    usb_camera_params_A = os.path.join(
         get_package_share_directory('roboquest_core'),
         'config',
         'usb_camera_A.yaml'
@@ -59,19 +59,19 @@ def generate_launch_description():
         executable="usb_cam_node_exe",
         parameters=[usb_camera_params_A],
         remappings=[
-            ('/image_raw', '/image_A_raw'),
+            ('/image_raw', '/usb_A_raw'),
         ],
         respawn=True,
         respawn_delay=15
     )
 
-    usb_camera_node_B(
+    usb_camera_node_B = Node(
         name='usb_camera_node_B',
         package="usb_cam",
         executable="usb_cam_node_exe",
         parameters=[usb_camera_params_B],
         remappings=[
-            ('/image_raw', '/image_B_raw'),
+            ('/image_raw', '/usb_B_raw'),
         ],
         respawn=True,
         respawn_delay=15
@@ -83,7 +83,7 @@ def generate_launch_description():
         executable="usb_cam_node_exe",
         parameters=[usb_camera_params_C],
         remappings=[
-            ('/image_raw', '/image_C_raw'),
+            ('/image_raw', '/usb_C_raw'),
         ],
         respawn=True,
         respawn_delay=15

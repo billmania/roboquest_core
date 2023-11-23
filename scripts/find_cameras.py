@@ -2,14 +2,37 @@
 Utility function to find connected cameras.
 """
 
+from sys import exit
+from subprocess import run as run_process
 from pathlib import Path
 from typing import List
-from v4l2py.device import Device, Capability
-have_csi = True
+try:
+    from v4l2py.device import Device, Capability
+except ModuleNotFoundError:
+    run_process(
+        ['apt', 'install', '-y', 'python3-libcamera'],
+        check=True,
+        timeout=10.0,
+        capture_output=False
+    )
+    run_process(
+        ['pip3', 'install', 'v4l2py'],
+        check=True,
+        timeout=10.0,
+        capture_output=False
+    )
+    exit(0)
+
 try:
     from picamera2 import Picamera2
 except ModuleNotFoundError:
-    have_csi = False
+    run_process(
+        ['pip3', 'install', 'picamera2'],
+        check=True,
+        timeout=10.0,
+        capture_output=False
+    )
+    exit(0)
 
 CSI_TYPE = 'ov5647'
 
@@ -47,8 +70,7 @@ def _csi_device_found() -> bool:
         #
         # Likely on a host without the CSI, ie. not a Raspberry Pi.
         #
-        if have_csi:
-            raise e
+        raise e
 
     except Exception:
         pass

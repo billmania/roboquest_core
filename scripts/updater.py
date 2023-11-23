@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import os
-from sys import exit
+from sys import exit, modules
 from pathlib import Path
 from requests import get
 import logging
@@ -28,7 +28,7 @@ Files and directories:
     - systemd service with auto restart
 """
 
-VERSION = 12
+VERSION = 13
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -39,9 +39,10 @@ DIRECTORIES = [OS_PERSIST, '/opt/updater']
 CONFIG_FILES = ['configuration.json']
 UPDATE_LOG = '/opt/updater/updater.log'
 UPDATE_FIFO = '/tmp/update_fifo'
-UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
 UPDATE_SCRIPT = 'updater.py'
-UPDATE_URL = 'http://registry.q4excellence.com:8079/' + UPDATE_SCRIPT
+BASE_URL = 'http://registry.q4excellence.com:8079/'
+UPDATE_URL = BASE_URL + UPDATE_SCRIPT
+UPDATE_VERSION = BASE_URL + 'updater_version.txt'
 LOOP_PERIOD_S = 10.0
 EOL = '\n'
 
@@ -75,6 +76,26 @@ CONTAINERS = {
 }
 
 
+def _install_module(module_name: str):
+    """
+    Install a python module required by updater.py, by retrieving
+    it from the registry server. All retrieved modules are placed
+    in the current directory.
+    """
+
+    response = get(BASE_URL + module_name, timeout=10.0)
+    if response.status_code == 200:
+        with open(module_name, 'w') as f:
+            f.write(response.text)
+        logging.info(f'{module_name} installed')
+    else:
+        logging.warning(f'Failed to retrieve {module_name},'
+                        f' status code {response.status_code}')
+
+    logging.warning('Exiting')
+    exit(0)
+
+
 class RQUpdate(object):
     """
     All of the methods to manage the update process.
@@ -101,6 +122,16 @@ class RQUpdate(object):
         self._updater_version = None
 
         self._fifo_path = fifo_path
+        try:
+            import find_cameras
+        except ModuleNotFoundError:
+            _install_module('rq_hat.py')
+        find_cameras.write_cameras_file(
+            find_cameras.find_cameras(),
+            OS_PERSIST
+        )
+        del modules['find_cameras']
+        del find_cameras
 
         self._setup_shutdown()
         self._setup_docker()
