@@ -39,8 +39,8 @@ def generate_launch_description():
         respawn_delay=5
     )
 
-    rq_camera_node = Node(
-        name='rq_camera_node',
+    rq_camera_node0 = Node(
+        name='rq_camera_node0',
         package="camera_ros",
         executable="camera_node",
         parameters=[camera0_params],
@@ -70,7 +70,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([rq_base_node,
-                              rq_camera_node,
+                              rq_camera_node0,
                               rq_camera_node1,
                               rq_camera_node2,
                               rq_camera_node3
