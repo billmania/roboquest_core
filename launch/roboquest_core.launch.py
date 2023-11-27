@@ -9,10 +9,25 @@ def generate_launch_description():
         'config',
         'roboquest_base.yaml'
     )
-    camera_params = os.path.join(
+    camera0_params = os.path.join(
         get_package_share_directory('roboquest_core'),
         'config',
-        'rq_camera.yaml'
+        'rq_camera0.yaml'
+    )
+    camera1_params = os.path.join(
+        get_package_share_directory('roboquest_core'),
+        'config',
+        'rq_camera1.yaml'
+    )
+    camera2_params = os.path.join(
+        get_package_share_directory('roboquest_core'),
+        'config',
+        'rq_camera2.yaml'
+    )
+    camera3_params = os.path.join(
+        get_package_share_directory('roboquest_core'),
+        'config',
+        'rq_camera3.yaml'
     )
 
     rq_base_node = Node(
@@ -24,32 +39,39 @@ def generate_launch_description():
         respawn_delay=5
     )
 
-    # un-comment one camera and adjust the return statement below
-
-    #
-    # For the ArduCam/RasPiCam
-    #
-    rq_camera_node = Node(
-        name='rq_camera_node',
+    rq_camera_node0 = Node(
+        name='rq_camera_node0',
         package="camera_ros",
         executable="camera_node",
-        parameters=[camera_params],
+        parameters=[camera0_params],
         respawn=True,
         respawn_delay=5
     )
-
-    #
-    # For a generic USB webcam
-    #
-    #rq_camera_node = Node(
-    #    name='rq_camera_node',
-    #    package="usb_cam",
-    #    executable="usb_cam_node_exe",
-    #    parameters=[camera_params],
-    #    respawn=True,
-    #    respawn_delay=5
-    #)
+    rq_camera_node1 = Node(
+        name='rq_camera_node1',
+        package="camera_ros",
+        executable="camera_node",
+        parameters=[camera1_params],
+        respawn=False
+    )
+    rq_camera_node2 = Node(
+        name='rq_camera_node2',
+        package="camera_ros",
+        executable="camera_node",
+        parameters=[camera2_params],
+        respawn=False
+    )
+    rq_camera_node3 = Node(
+        name='rq_camera_node3',
+        package="camera_ros",
+        executable="camera_node",
+        parameters=[camera3_params],
+        respawn=False
+    )
 
     return LaunchDescription([rq_base_node,
-                              rq_camera_node
+                              rq_camera_node0,
+                              rq_camera_node1,
+                              rq_camera_node2,
+                              rq_camera_node3
                              ])

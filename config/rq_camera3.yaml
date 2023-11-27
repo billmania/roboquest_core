@@ -1,9 +1,9 @@
 /**:
   ros__parameters:
+    camera: 3
     height: 480
     width: 640
     role: still
-    FrameDurationLimits: [ 100000, 100000 ]
     qos_overrides:
       /parameter_events:
         publisher:
