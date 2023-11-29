@@ -23,9 +23,9 @@ from std_srvs.srv import Empty
 from rq_msgs.srv import Control
 from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
-from rq_msgs.msg import ServoAngles
+from rq_msgs.msg import Servos
 
-VERSION = 20.1
+VERSION = 21
 
 JOYSTICK_MAX = 100
 #
@@ -111,16 +111,12 @@ class RQManage(RQNode):
         self.get_logger().fatal("_exit_worker: Calling kill")
         kill(getpid(), SIGKILL)
 
-    def _servo_cb(self, msg: ServoAngles) -> None:
+    def _servo_cb(self, msg: Servos) -> None:
         """
-        Extract the requested angle for each named servo and
-        send them to the servo controller. This method could need
-        a long time to run, dependent upon the configuration of the
-        servo delays and the quantity of servo commands in the
-        message.
-        Servo angle commands which are outside the configured
-        range of the servo are silently ignored. Commands to servos
-        which are currently disabled are silently ignored, too.
+        Extract the command for each servo and send them to the
+        servo controller. This method could need a long time to
+        run, dependent upon the configuration of the servo delays
+        and the quantity of servo commands in the message.
         """
 
         if not self._servos.controller_powered():
@@ -128,10 +124,19 @@ class RQManage(RQNode):
                                       throttle_duration_sec=60)
             return
 
-        # TODO: Refactor this into putting the commands in a queue
-        for servo in msg.servos:
+        for servo_id in self._servo_list:
+            servo = getattr(msg, servo_id)
+            if servo.command_type == 'X':
+                continue
+
             try:
-                self._servos.set_servo_angle(servo.name, servo.angle)
+                if servo.name:
+                    which_servo = servo.name
+                else:
+                    which_servo = servo_id.replace('servo', '')
+
+                if servo.command_type == 'A':
+                    self._servos.set_servo_angle(which_servo, servo.angle_deg)
 
             except TranslateError as e:
                 self.get_logger().warning(
@@ -269,7 +274,16 @@ class RQManage(RQNode):
             'motor_speed',
             self._motor_speed_cb,
             1)
-        self._servo_sub = self.create_subscription(ServoAngles,
+        #
+        # Collect the servos specified in the Servos message,
+        # to optimize the callback.
+        #
+        self._servo_list = []
+        for servo in dir(Servos()):
+            if servo.find('servo') == 0:
+                self._servo_list.append(servo)
+
+        self._servo_sub = self.create_subscription(Servos,
                                                    'servos',
                                                    self._servo_cb,
                                                    1)
