@@ -25,7 +25,7 @@ from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import ServoAngles
 
-VERSION = 20
+VERSION = 20.1
 
 JOYSTICK_MAX = 100
 #
@@ -237,7 +237,7 @@ class RQManage(RQNode):
             self._hat.fet1_control(set_fet1_on)
 
         if request.set_fet2 in valid_values:
-            set_fet2_on = True if request.set_fet1 == 'ON' \
+            set_fet2_on = True if request.set_fet2 == 'ON' \
                 else False
             self._hat.fet2_control(set_fet2_on)
 
