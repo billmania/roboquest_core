@@ -175,9 +175,11 @@ class RQManage(RQNode):
                                       throttle_duration_sec=60)
             return
 
-        self.get_logger().debug("motor_cb"
-                                f" linear_x: {msg.twist.linear.x}"
-                                f", angular_z: {msg.twist.angular.z}")
+        self.get_logger().debug(
+            "motor_cb"
+            f" linear_x: {msg.twist.linear.x}"
+            f", angular_z: {msg.twist.angular.z}"
+        )
 
         #
         # The units for linear.x are meters per second and for angular.z
