@@ -48,6 +48,8 @@ INSTALL_DIR = '/usr/src/ros2ws/install'
 PERSIST_BASE_DIR = INSTALL_DIR + '/roboquest_core/share/roboquest_core'
 PERSIST_DIR = PERSIST_BASE_DIR + '/persist'
 SERVO_CONFIG = 'servos_config.json'
+COMMAND_IGNORE = 0
+COMMAND_ANGLE = 1
 
 
 class RQManage(RQNode):
@@ -126,16 +128,13 @@ class RQManage(RQNode):
 
         for servo_id in self._servo_list:
             servo = getattr(msg, servo_id)
-            if servo.command_type == 'X':
+            if servo.command_type == COMMAND_IGNORE:
                 continue
 
             try:
-                if servo.name:
-                    which_servo = servo.name
-                else:
-                    which_servo = servo_id.replace('servo', '')
+                which_servo = servo_id.replace('servo', '')
 
-                if servo.command_type == 'A':
+                if servo.command_type == COMMAND_ANGLE:
                     self._servos.set_servo_angle(which_servo, servo.angle_deg)
 
             except TranslateError as e:
