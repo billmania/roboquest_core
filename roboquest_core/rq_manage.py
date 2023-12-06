@@ -50,6 +50,7 @@ PERSIST_DIR = PERSIST_BASE_DIR + '/persist'
 SERVO_CONFIG = 'servos_config.json'
 COMMAND_IGNORE = 0
 COMMAND_ANGLE = 1
+COMMAND_INCR = 2
 
 
 class RQManage(RQNode):
@@ -135,7 +136,13 @@ class RQManage(RQNode):
                 which_servo = servo_id.replace('servo', '')
 
                 if servo.command_type == COMMAND_ANGLE:
-                    self._servos.set_servo_angle(which_servo, servo.angle_deg)
+                    self._servos.set_servo_angle(
+                        which_servo,
+                        servo.angle_deg)
+                elif servo.command_type == COMMAND_INCR:
+                    self._servos.incr_servo_angle(
+                        which_servo,
+                        servo.angle_incr_deg)
 
             except TranslateError as e:
                 self.get_logger().warning(

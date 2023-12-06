@@ -5,7 +5,7 @@ import smbus2
 
 import RPi.GPIO as GPIO
 from roboquest_core.rq_servos_config import servo_map_and_state
-from roboquest_core.rq_servos_config import SERVO_QTY
+from roboquest_core.rq_servos_config import SERVO_QTY, Servo
 
 SERVO_ENABLE_PIN = 23
 I2C_BUS_ID = 1
@@ -59,14 +59,6 @@ class ServoError(Exception):
 class TranslateError(Exception):
     """
     Errors in calls to or operation of the _translate() method.
-    """
-
-    pass
-
-
-class MotionError(Exception):
-    """
-    Errors in calls to or operation of the _slow_motion() method.
     """
 
     pass
@@ -156,21 +148,13 @@ class RQServos(object):
                                   PULSE0_OFF_H_REG+4*channel,
                                   off_count >> 8)
 
-    def set_servo_angle(self,
-                        channel: Union[int, str],
-                        angle: int = None) -> int:
+    def _get_servo(
+            self,
+            channel: Union[int, str]
+            ) -> Servo:
         """
-        Servos can be identified by: a string name; a string representation
-        of the channel number; or an integer channel number.
-
-        For servo channel set its angle. If no angle is provided, set
-        the default angle. The default is the previously set angle.
-
-        The flow is from an angle in degrees, to a pulse duration
-        in microseconds, and finally to a register value in "counts".
-
-        The return value is the angle to which the servo was actually
-        moved, after limiting the acceleration.
+        Using the channel as key, retrieve and return the servo
+        object.
         """
 
         try:
@@ -191,6 +175,41 @@ class RQServos(object):
                     f"set_servo_angle: {channel} not a recognized servo name"
                 )
 
+        return servo
+
+    def incr_servo_angle(
+            self,
+            channel: Union[int, str],
+            increment_deg: int = 0) -> int:
+        """
+        Retrieve the current servo angle, change it by the
+        signed value in increment_deg, and set that new
+        angle.
+        """
+
+        servo = self._get_servo(channel)
+        new_angle = (self._servos_state[servo['channel']]['angle'] +
+                     increment_deg)
+        self.set_servo_angle(channel, new_angle)
+
+    def set_servo_angle(self,
+                        channel: Union[int, str],
+                        angle: int = None) -> int:
+        """
+        Servos can be identified by: a string name; a string representation
+        of the channel number; or an integer channel number.
+
+        For servo channel set its angle. If no angle is provided, set
+        the default angle. The default is the previously set angle.
+
+        The flow is from an angle in degrees, to a pulse duration
+        in microseconds, and finally to a register value in "counts".
+
+        The return value is the angle to which the servo was actually
+        moved, after limiting the acceleration.
+        """
+
+        servo = self._get_servo(channel)
         if (self._controller_powered
                 and self._servos_state[servo['channel']]['enabled']):
             if angle is None:
@@ -199,11 +218,6 @@ class RQServos(object):
             angle = self._constrain(servo['joint_angle_min_deg'],
                                     angle,
                                     servo['joint_angle_max_deg'])
-
-            #
-            # This is the spot where the _slow_motion() method could be
-            # inserted.
-            #
 
             pulse_duration_ms = self._translate(
                 angle,
@@ -309,37 +323,3 @@ class RQServos(object):
         """
 
         return max(min(value, max_value), min_value)
-
-    def _slow_motion(
-            self,
-            from_angle: int,
-            to_angle: int,
-            step_amount: int = ANGLE_STEP_DEG) -> int:
-        """
-        Since the servo controller doesn't provide a means to adjust
-        the speed of the servo angle change or to reduce the acceleration,
-        this method will limit the amount of angle change per cycle,
-        as a crude way of reducing the acceleration.
-        from_angle is the starting point and to_angle is the destination.
-        step_amount is the maximum angle to change per cycle.
-
-        The return value is the next angle for the servo.
-        """
-
-        if (not 0 <= from_angle <= 180
-                or not 0 <= to_angle <= 180):
-            raise MotionError("from or to out of range")
-
-        if from_angle == to_angle:
-            return to_angle
-
-        distance = from_angle - to_angle
-        if abs(distance) > step_amount:
-            if from_angle > to_angle:
-                next_position = from_angle - step_amount
-            else:
-                next_position = from_angle + step_amount
-        else:
-            next_position = to_angle
-
-        return next_position
