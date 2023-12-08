@@ -99,7 +99,10 @@ class RQManage(RQNode):
         #
         self._servo_config = ConfigFile(PERSIST_DIR)
         self._servo_config.init_config(SERVO_CONFIG, servo_config)
-        self._servos = RQServos(self._servo_config.get_config(SERVO_CONFIG))
+        self._servos = RQServos(
+            self._servo_config.get_config(SERVO_CONFIG),
+            self.get_logger().warning,
+        )
 
         self._exit_timer = Timer(EXIT_DELAY_S, self._exit_worker)
 
