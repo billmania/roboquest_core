@@ -51,6 +51,7 @@ SERVO_CONFIG = 'servos_config.json'
 COMMAND_IGNORE = 0
 COMMAND_ANGLE = 1
 COMMAND_INCR = 2
+COMMAND_SPEED = 3
 
 
 class RQManage(RQNode):
@@ -146,6 +147,16 @@ class RQManage(RQNode):
                     self._servos.incr_servo_angle(
                         which_servo,
                         servo.angle_incr_deg)
+                elif servo.command_type == COMMAND_SPEED:
+                    self.get_logger().info(
+                        '_servo_cb:'
+                        f' servo: {which_servo}'
+                        f' speed: {servo.speed_dps}'
+                    )
+                    self._servos.set_servo_speed(
+                        which_servo,
+                        servo.speed_dps
+                    )
 
             except TranslateError as e:
                 self.get_logger().warning(

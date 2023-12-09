@@ -35,7 +35,7 @@ MAX_PULSE_US = 20000
 MIN_COUNT = 0
 MAX_COUNT = 4095
 PULSE_ON_COUNT = MIN_COUNT
-MOVE_PERIOD_S = 5.0
+MOVE_PERIOD_S = 0.1
 INIT_DELAY_S = 0.05
 
 #
@@ -286,16 +286,52 @@ class RQServos(object):
     def set_servo_speed(
             self,
             channel: Union[int, str],
-            degrees_per_sec: float = 0.0) -> None:
+            degrees_per_sec: int = 0) -> None:
         """
         Cause the servo to move away from its current position at the
         rate degrees_per_sec until stopped or a limit is reached. A
         thread is used to continue the motion until it's stopped.
         Motion can be stopped by any of: setting degrees_per_sec to
         0.0; calling incr_servo_angle; calling set_servo_angle.
+
+        Using MOVE_PERIOD_S as the time period, calculate how many
+        degrees to move to achieve degrees_per_sec.
         """
-        # TODO: Implement
-        pass
+
+        self._logger(
+            '_set_servo_speed:'
+            f' channel: {channel}'
+            f' degrees_per_sec: {degrees_per_sec}'
+        )
+        servo = self._get_servo(channel)
+        servo_state = self._servos_state_list[servo['channel']]
+
+        if degrees_per_sec == 0:
+            if servo_state['command_angle'] == servo_state['angle']:
+                self._logger(
+                    '_set_servo_speed: Speed already 0'
+                )
+                return
+
+            servo_state['command_angle'] = servo_state['angle']
+        else:
+            angle = servo_state['angle']
+            angle += round(degrees_per_sec * MOVE_PERIOD_S)
+            new_command_angle = self._constrain(
+                servo['joint_angle_min_deg'],
+                angle,
+                servo['joint_angle_max_deg']
+            )
+
+            if new_command_angle == servo_state['command_angle']:
+                self._logger(
+                    '_set_servo_speed: command_angle already set'
+                )
+                return
+
+            servo_state['command_angle'] = new_command_angle
+
+        self._servo_changed.set()
 
     def incr_servo_angle(
             self,
