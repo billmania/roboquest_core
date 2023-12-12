@@ -35,7 +35,8 @@ MAX_PULSE_US = 20000
 MIN_COUNT = 0
 MAX_COUNT = 4095
 PULSE_ON_COUNT = MIN_COUNT
-MOVE_PERIOD_S = 0.1
+MOVE_PERIOD_S = 1.0
+FUDGE_PERIOD = MOVE_PERIOD_S * 0.05
 INIT_DELAY_S = 0.05
 
 #
@@ -73,7 +74,7 @@ class RQServos(object):
     bus.
     """
 
-    def __init__(self, servos_list: List[dict], logger=print):
+    def __init__(self, servos_list: List[dict], ros_logger=None):
         """
         Setup communication with the servo sub-system. The PCA9685 I2C
         servo controller isn't configured until it's powered and then
@@ -83,7 +84,7 @@ class RQServos(object):
         self._write_errors = 0
 
         self._servos_list = servos_list
-        self._logger = logger
+        self._ros_logger = ros_logger
         #
         # self._servos_list is a list of Servo objects, indexed by their
         # position in the list. Their index position corresponds with their
@@ -107,6 +108,7 @@ class RQServos(object):
         self._servo_changed = Event()
         self._servo_changed.clear()
         self._servo_lock = Lock()
+        self._servo_state_lock = Lock()
         self._servo_period = Thread(
             group=None,
             target=self._time_servos,
@@ -231,6 +233,10 @@ class RQServos(object):
         isn't any information about the servo's rate of loaded or
         unloaded change, the record of the servo's current angle is a
         crude guess at best.
+
+        When a servo was most recently commanded to move at a certain
+        speed, this method calls set_servo_speed() to update the
+        command_angle.
         """
 
         while True:
@@ -248,9 +254,29 @@ class RQServos(object):
                     servo_state['command_angle']
                 )
 
+                if (servo_state['command_dps'] and
+                        servo_state['command_timestamp'] and
+                        (time() - servo_state['command_timestamp']) >=
+                        (MOVE_PERIOD_S - FUDGE_PERIOD)):
+                    #
+                    # This servo is in "speed" mode AND at least
+                    # MOVE_PERIOD_S has elapsed since the last time
+                    # through this loop. Therefore it's time to
+                    # calculate the next amount of motion.
+                    #
+                    self.set_servo_speed(
+                        channel,
+                        servo_state['command_dps']
+                    )
+
                 if command_angle == servo_state['angle']:
-                    servo_state['command_timestamp'] = time()
+                    with self._servo_state_lock:
+                        servo_state['command_timestamp'] = time()
                     continue
+
+                with self._servo_state_lock:
+                    servo_state['angle'] = command_angle
+                    servo_state['command_timestamp'] = time()
 
                 try:
                     pulse_duration_ms = self._translate(
@@ -268,20 +294,16 @@ class RQServos(object):
                         MAX_COUNT)
 
                 except TranslateError as e:
-                    self._logger(
-                        f'_move_servos: {e}'
+                    self._ros_logger().warn(
+                        f'_move_servos: translate {e}',
+                        throttle_duration_sec=15
                     )
                     continue
 
-                self._logger(
-                    f'_move_servos: channel {channel}, angle {command_angle}'
-                )
                 self._set_servo_pwm(
                     channel,
                     PULSE_ON_COUNT,
                     round(pulse_off_count))
-                servo_state['angle'] = command_angle
-                servo_state['command_timestamp'] = time()
 
     def set_servo_speed(
             self,
@@ -291,29 +313,25 @@ class RQServos(object):
         Cause the servo to move away from its current position at the
         rate degrees_per_sec until stopped or a limit is reached. A
         thread is used to continue the motion until it's stopped.
-        Motion can be stopped by any of: setting degrees_per_sec to
-        0.0; calling incr_servo_angle; calling set_servo_angle.
+        This motion can be stopped by any of: setting degrees_per_sec
+        to 0.0; calling incr_servo_angle; calling set_servo_angle.
 
         Using MOVE_PERIOD_S as the time period, calculate how many
         degrees to move to achieve degrees_per_sec.
         """
 
-        self._logger(
-            '_set_servo_speed:'
-            f' channel: {channel}'
-            f' degrees_per_sec: {degrees_per_sec}'
-        )
         servo = self._get_servo(channel)
         servo_state = self._servos_state_list[servo['channel']]
 
         if degrees_per_sec == 0:
+            with self._servo_state_lock:
+                servo_state['command_dps'] = None
+                servo_state['command_timestamp'] = None
             if servo_state['command_angle'] == servo_state['angle']:
-                self._logger(
-                    '_set_servo_speed: Speed already 0'
-                )
                 return
 
-            servo_state['command_angle'] = servo_state['angle']
+            with self._servo_state_lock:
+                servo_state['command_angle'] = servo_state['angle']
         else:
             angle = servo_state['angle']
             angle += round(degrees_per_sec * MOVE_PERIOD_S)
@@ -324,12 +342,12 @@ class RQServos(object):
             )
 
             if new_command_angle == servo_state['command_angle']:
-                self._logger(
-                    '_set_servo_speed: command_angle already set'
-                )
                 return
 
-            servo_state['command_angle'] = new_command_angle
+            with self._servo_state_lock:
+                servo_state['command_angle'] = new_command_angle
+                servo_state['command_dps'] = degrees_per_sec
+                servo_state['command_timestamp'] = 0
 
         self._servo_changed.set()
 
@@ -344,28 +362,36 @@ class RQServos(object):
         """
 
         servo = self._get_servo(channel)
-        new_angle = (self._servos_state_list[servo['channel']]['angle'] +
-                     increment_deg)
-        angle = self._constrain(servo['joint_angle_min_deg'],
-                                new_angle,
-                                servo['joint_angle_max_deg'])
-        self._servos_state_list[servo['channel']]['command_angle'] = angle
+        servo_state = self._servos_state_list[servo['channel']]
+        incr_angle = (servo_state['angle'] + increment_deg)
+        new_command_angle = self._constrain(
+            servo['joint_angle_min_deg'],
+            incr_angle,
+            servo['joint_angle_max_deg']
+        )
+        with self._servo_state_lock:
+            servo_state['command_dps'] = None
+            servo_state['command_timestamp'] = None
+        if new_command_angle == servo_state['command_angle']:
+            return
+
+        with self._servo_state_lock:
+            servo_state['command_angle'] = new_command_angle
+
         self._servo_changed.set()
 
     def set_servo_angle(self,
                         channel: Union[int, str],
                         angle: int = None) -> None:
         """
-        Servos can be identified by: a string name; a string representation
-        of the channel number; or an integer channel number.
-
         For servo channel set its angle. If no angle is provided, set
         the default angle. The default is the previously set angle.
         """
 
         servo = self._get_servo(channel)
+        servo_state = self._servos_state_list[servo['channel']]
         if angle is None:
-            angle = self._servos_state_list[servo['channel']]['angle']
+            angle = servo_state['angle']
 
         new_command_angle = self._constrain(
             servo['joint_angle_min_deg'],
@@ -373,11 +399,15 @@ class RQServos(object):
             servo['joint_angle_max_deg']
         )
 
-        servo_state = self._servos_state_list[servo['channel']]
+        with self._servo_state_lock:
+            servo_state['command_dps'] = None
+            servo_state['command_timestamp'] = None
         if new_command_angle == servo_state['command_angle']:
             return
 
-        servo_state['command_angle'] = new_command_angle
+        with self._servo_state_lock:
+            servo_state['command_angle'] = new_command_angle
+
         self._servo_changed.set()
 
     def _pca9685_init(self):
@@ -406,11 +436,13 @@ class RQServos(object):
                     self.set_servo_angle(
                         channel,
                         servo['joint_angle_init_deg'])
-                    servo_state['angle'] = servo['joint_angle_init_deg']
-                    servo_state['command_angle'] = (
-                        servo['joint_angle_init_deg']
-                    )
-                    servo_state['command_timestamp'] = time()
+                    with self._servo_state_lock:
+                        servo_state['command_dps'] = None
+                        servo_state['angle'] = servo['joint_angle_init_deg']
+                        servo_state['command_angle'] = (
+                            servo['joint_angle_init_deg']
+                        )
+                        servo_state['command_timestamp'] = time()
 
                 except TranslateError:
                     servo_state['angle'] = None
@@ -433,7 +465,8 @@ class RQServos(object):
         is undone by restore_servo_angle().
         """
 
-        self._servos_state_list[channel]['enabled'] = False
+        with self._servo_state_lock:
+            self._servos_state_list[channel]['enabled'] = False
         self._set_servo_pwm(channel, 0, 0)
 
     def restore_servo_angle(self, channel: int) -> None:
