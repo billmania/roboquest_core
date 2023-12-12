@@ -1,11 +1,12 @@
 from typing import Union, List
-from time import sleep
+from time import sleep, time
+from threading import Thread, Lock, Event
 
 import smbus2
 
 import RPi.GPIO as GPIO
 from roboquest_core.rq_servos_config import servo_map_and_state
-from roboquest_core.rq_servos_config import SERVO_QTY
+from roboquest_core.rq_servos_config import SERVO_QTY, Servo
 
 SERVO_ENABLE_PIN = 23
 I2C_BUS_ID = 1
@@ -34,6 +35,9 @@ MAX_PULSE_US = 20000
 MIN_COUNT = 0
 MAX_COUNT = 4095
 PULSE_ON_COUNT = MIN_COUNT
+MOVE_PERIOD_S = 1.0
+FUDGE_PERIOD = MOVE_PERIOD_S * 0.05
+INIT_DELAY_S = 0.05
 
 #
 # PCA9685 constants
@@ -64,21 +68,13 @@ class TranslateError(Exception):
     pass
 
 
-class MotionError(Exception):
-    """
-    Errors in calls to or operation of the _slow_motion() method.
-    """
-
-    pass
-
-
 class RQServos(object):
     """
     Manages the operation of the PCA9685 controller connected to the I2C
     bus.
     """
 
-    def __init__(self, servos: List[dict]):
+    def __init__(self, servos_list: List[dict], ros_logger=None):
         """
         Setup communication with the servo sub-system. The PCA9685 I2C
         servo controller isn't configured until it's powered and then
@@ -87,12 +83,44 @@ class RQServos(object):
 
         self._write_errors = 0
 
-        self._servos = servos
-        self._name_map, self._servos_state = servo_map_and_state(self._servos)
+        self._servos_list = servos_list
+        self._ros_logger = ros_logger
+        #
+        # self._servos_list is a list of Servo objects, indexed by their
+        # position in the list. Their index position corresponds with their
+        # servo channel number.
+        #
+        # self._servo_name_map is a dictionary of Servo objects, keyed by the
+        # servo joint_name. It's a map from the joint_name to the Servo object.
+        #
+        # self._servos_state_list is a list of objects (not Servo objects)
+        # which track the current state of the servo. These objects are indexed
+        # by their position in the list, which corresponds again with their
+        # servo channel number.
+        #
+        self._servo_name_map, self._servos_state_list = (
+            servo_map_and_state(self._servos_list)
+        )
         self._controller_powered = False
 
         self._setup_gpio()
         self._setup_i2c()
+        self._servo_changed = Event()
+        self._servo_changed.clear()
+        self._servo_lock = Lock()
+        self._servo_state_lock = Lock()
+        self._servo_period = Thread(
+            group=None,
+            target=self._time_servos,
+            name='servos_timer',
+            daemon=None)
+        self._servo_worker = Thread(
+            group=None,
+            target=self._move_servos,
+            name='servos_worker',
+            daemon=None)
+        self._servo_worker.start()
+        self._servo_period.start()
 
     def _setup_gpio(self) -> None:
         """
@@ -143,40 +171,33 @@ class RQServos(object):
         based on a desired angle.
         """
 
-        self._bus.write_byte_data(I2C_DEVICE_ID,
-                                  PULSE0_ON_L_REG+4*channel,
-                                  on_count & 0xFF)
-        self._bus.write_byte_data(I2C_DEVICE_ID,
-                                  PULSE0_ON_H_REG+4*channel,
-                                  on_count >> 8)
-        self._bus.write_byte_data(I2C_DEVICE_ID,
-                                  PULSE0_OFF_L_REG+4*channel,
-                                  off_count & 0xFF)
-        self._bus.write_byte_data(I2C_DEVICE_ID,
-                                  PULSE0_OFF_H_REG+4*channel,
-                                  off_count >> 8)
+        with self._servo_lock:
+            self._bus.write_byte_data(I2C_DEVICE_ID,
+                                      PULSE0_ON_L_REG+4*channel,
+                                      on_count & 0xFF)
+            self._bus.write_byte_data(I2C_DEVICE_ID,
+                                      PULSE0_ON_H_REG+4*channel,
+                                      on_count >> 8)
+            self._bus.write_byte_data(I2C_DEVICE_ID,
+                                      PULSE0_OFF_L_REG+4*channel,
+                                      off_count & 0xFF)
+            self._bus.write_byte_data(I2C_DEVICE_ID,
+                                      PULSE0_OFF_H_REG+4*channel,
+                                      off_count >> 8)
 
-    def set_servo_angle(self,
-                        channel: Union[int, str],
-                        angle: int = None) -> int:
+    def _get_servo(
+            self,
+            channel: Union[int, str]
+            ) -> Servo:
         """
-        Servos can be identified by: a string name; a string representation
-        of the channel number; or an integer channel number.
-
-        For servo channel set its angle. If no angle is provided, set
-        the default angle. The default is the previously set angle.
-
-        The flow is from an angle in degrees, to a pulse duration
-        in microseconds, and finally to a register value in "counts".
-
-        The return value is the angle to which the servo was actually
-        moved, after limiting the acceleration.
+        Using the channel as key, retrieve and return the servo
+        object.
         """
 
         try:
             channel_number = int(channel)
             if 0 <= channel_number < SERVO_QTY:
-                servo = self._servos[channel_number]
+                servo = self._servos_list[channel_number]
             else:
                 raise ServoError(
                     f"set_servo_angle: {channel_number} must be"
@@ -184,81 +205,249 @@ class RQServos(object):
                 )
 
         except ValueError:
-            if channel in self._name_map:
-                servo = self._name_map[channel]
+            if channel in self._servo_name_map:
+                servo = self._servo_name_map[channel]
             else:
                 raise ServoError(
                     f"set_servo_angle: {channel} not a recognized servo name"
                 )
 
-        if (self._controller_powered
-                and self._servos_state[servo['channel']]['enabled']):
-            if angle is None:
-                angle = self._servos_state[servo['channel']]['angle']
+        return servo
 
-            angle = self._constrain(servo['joint_angle_min_deg'],
-                                    angle,
-                                    servo['joint_angle_max_deg'])
+    def _time_servos(self) -> None:
+        """
+        Set the _servo_changed Event every MOVE_PERIOD_S seconds.
+        """
 
-            #
-            # This is the spot where the _slow_motion() method could be
-            # inserted.
-            #
+        while True:
+            self._servo_changed.set()
+            sleep(MOVE_PERIOD_S)
 
-            pulse_duration_ms = self._translate(
+    def _move_servos(self) -> None:
+        """
+        Executed by a separate thread and controlled by an Event.
+
+        Loops through self._servos_state_list to set the commanded angles
+        and update the current angle for each servo.  Since there isn't
+        any feedback from the servo about its current angle and there
+        isn't any information about the servo's rate of loaded or
+        unloaded change, the record of the servo's current angle is a
+        crude guess at best.
+
+        When a servo was most recently commanded to move at a certain
+        speed, this method calls set_servo_speed() to update the
+        command_angle.
+        """
+
+        while True:
+            self._servo_changed.wait()
+            self._servo_changed.clear()
+            if not self._controller_powered:
+                continue
+
+            for channel, servo_state in enumerate(self._servos_state_list):
+                if not servo_state['enabled']:
+                    continue
+
+                servo = self._servos_list[channel]
+                command_angle = (
+                    servo_state['command_angle']
+                )
+
+                if (servo_state['command_dps'] and
+                        servo_state['command_timestamp'] and
+                        (time() - servo_state['command_timestamp']) >=
+                        (MOVE_PERIOD_S - FUDGE_PERIOD)):
+                    #
+                    # This servo is in "speed" mode AND at least
+                    # MOVE_PERIOD_S has elapsed since the last time
+                    # through this loop. Therefore it's time to
+                    # calculate the next amount of motion.
+                    #
+                    self.set_servo_speed(
+                        channel,
+                        servo_state['command_dps']
+                    )
+
+                if command_angle == servo_state['angle']:
+                    with self._servo_state_lock:
+                        servo_state['command_timestamp'] = time()
+                    continue
+
+                with self._servo_state_lock:
+                    servo_state['angle'] = command_angle
+                    servo_state['command_timestamp'] = time()
+
+                try:
+                    pulse_duration_ms = self._translate(
+                        command_angle,
+                        servo['servo_angle_min_deg'],
+                        servo['servo_angle_max_deg'],
+                        servo['pulse_min_us'],
+                        servo['pulse_max_us'])
+
+                    pulse_off_count = self._translate(
+                        pulse_duration_ms,
+                        MIN_PULSE_US,
+                        MAX_PULSE_US,
+                        MIN_COUNT,
+                        MAX_COUNT)
+
+                except TranslateError as e:
+                    self._ros_logger().warn(
+                        f'_move_servos: translate {e}',
+                        throttle_duration_sec=15
+                    )
+                    continue
+
+                self._set_servo_pwm(
+                    channel,
+                    PULSE_ON_COUNT,
+                    round(pulse_off_count))
+
+    def set_servo_speed(
+            self,
+            channel: Union[int, str],
+            degrees_per_sec: int = 0) -> None:
+        """
+        Cause the servo to move away from its current position at the
+        rate degrees_per_sec until stopped or a limit is reached. A
+        thread is used to continue the motion until it's stopped.
+        This motion can be stopped by any of: setting degrees_per_sec
+        to 0.0; calling incr_servo_angle; calling set_servo_angle.
+
+        Using MOVE_PERIOD_S as the time period, calculate how many
+        degrees to move to achieve degrees_per_sec.
+        """
+
+        servo = self._get_servo(channel)
+        servo_state = self._servos_state_list[servo['channel']]
+
+        if degrees_per_sec == 0:
+            with self._servo_state_lock:
+                servo_state['command_dps'] = None
+                servo_state['command_timestamp'] = None
+            if servo_state['command_angle'] == servo_state['angle']:
+                return
+
+            with self._servo_state_lock:
+                servo_state['command_angle'] = servo_state['angle']
+        else:
+            angle = servo_state['angle']
+            angle += round(degrees_per_sec * MOVE_PERIOD_S)
+            new_command_angle = self._constrain(
+                servo['joint_angle_min_deg'],
                 angle,
-                servo['servo_angle_min_deg'],
-                servo['servo_angle_max_deg'],
-                servo['pulse_min_us'],
-                servo['pulse_max_us'])
+                servo['joint_angle_max_deg']
+            )
 
-            pulse_off_count = self._translate(
-                pulse_duration_ms,
-                MIN_PULSE_US,
-                MAX_PULSE_US,
-                MIN_COUNT,
-                MAX_COUNT)
+            if new_command_angle == servo_state['command_angle']:
+                return
 
-            self._set_servo_pwm(
-                servo['channel'],
-                PULSE_ON_COUNT,
-                round(pulse_off_count))
-            self._servos_state[servo['channel']]['angle'] = angle
+            with self._servo_state_lock:
+                servo_state['command_angle'] = new_command_angle
+                servo_state['command_dps'] = degrees_per_sec
+                servo_state['command_timestamp'] = 0
 
-            return angle
+        self._servo_changed.set()
+
+    def incr_servo_angle(
+            self,
+            channel: Union[int, str],
+            increment_deg: int = 0) -> int:
+        """
+        Retrieve the current servo angle, change it by the
+        signed value in increment_deg, and set that new
+        angle.
+        """
+
+        servo = self._get_servo(channel)
+        servo_state = self._servos_state_list[servo['channel']]
+        incr_angle = (servo_state['angle'] + increment_deg)
+        new_command_angle = self._constrain(
+            servo['joint_angle_min_deg'],
+            incr_angle,
+            servo['joint_angle_max_deg']
+        )
+        with self._servo_state_lock:
+            servo_state['command_dps'] = None
+            servo_state['command_timestamp'] = None
+        if new_command_angle == servo_state['command_angle']:
+            return
+
+        with self._servo_state_lock:
+            servo_state['command_angle'] = new_command_angle
+
+        self._servo_changed.set()
+
+    def set_servo_angle(self,
+                        channel: Union[int, str],
+                        angle: int = None) -> None:
+        """
+        For servo channel set its angle. If no angle is provided, set
+        the default angle. The default is the previously set angle.
+        """
+
+        servo = self._get_servo(channel)
+        servo_state = self._servos_state_list[servo['channel']]
+        if angle is None:
+            angle = servo_state['angle']
+
+        new_command_angle = self._constrain(
+            servo['joint_angle_min_deg'],
+            angle,
+            servo['joint_angle_max_deg']
+        )
+
+        with self._servo_state_lock:
+            servo_state['command_dps'] = None
+            servo_state['command_timestamp'] = None
+        if new_command_angle == servo_state['command_angle']:
+            return
+
+        with self._servo_state_lock:
+            servo_state['command_angle'] = new_command_angle
+
+        self._servo_changed.set()
 
     def _pca9685_init(self):
         """
         Configure the PCA9685 for use, usually each time power is applied.
 
-        MODE1 to wake
-        MODE2 to totem pole
-        PRESCALE to 50 Hz
-
         Set the initial angle of each defined servo according to the
         configuration parameters.
         """
 
-        for register, value in SETUPS:
-            self._bus.write_byte_data(I2C_DEVICE_ID, register, value)
-            sleep(0.05)
+        with self._servo_lock:
+            for register, value in SETUPS:
+                self._bus.write_byte_data(I2C_DEVICE_ID, register, value)
+                sleep(INIT_DELAY_S)
 
-        for servo in self._servos:
-            channel = servo['channel']
-
+        for channel, servo in enumerate(self._servos_list):
             if servo['joint_name']:
-                self._servos_state[channel]['enabled'] = True
+                self._servos_state_list[channel]['enabled'] = True
                 #
                 # There isn't a way to know the servo's current
                 # angle so the following call may cause high acceleration
                 # of the servo angle.
                 #
                 try:
+                    servo_state = self._servos_state_list[channel]
                     self.set_servo_angle(
                         channel,
                         servo['joint_angle_init_deg'])
+                    with self._servo_state_lock:
+                        servo_state['command_dps'] = None
+                        servo_state['angle'] = servo['joint_angle_init_deg']
+                        servo_state['command_angle'] = (
+                            servo['joint_angle_init_deg']
+                        )
+                        servo_state['command_timestamp'] = time()
+
                 except TranslateError:
-                    pass
+                    servo_state['angle'] = None
+                    servo_state['command_angle'] = None
+                    servo_state['command_timestamp'] = None
             else:
                 self.disable_servo(channel)
 
@@ -276,7 +465,8 @@ class RQServos(object):
         is undone by restore_servo_angle().
         """
 
-        self._servos_state[channel]['enabled'] = False
+        with self._servo_state_lock:
+            self._servos_state_list[channel]['enabled'] = False
         self._set_servo_pwm(channel, 0, 0)
 
     def restore_servo_angle(self, channel: int) -> None:
@@ -286,7 +476,7 @@ class RQServos(object):
         """
 
         self.set_servo_angle(channel)
-        self._servos_state[channel]['enabled'] = True
+        self._servos_state_list[channel]['enabled'] = True
 
     def set_power(self, enable: bool = False) -> None:
         """
@@ -295,13 +485,13 @@ class RQServos(object):
 
         if (enable and not self._controller_powered):
             GPIO.output(SERVO_ENABLE_PIN, GPIO.HIGH)
-            sleep(0.5)
-            self._controller_powered = True
+            sleep(INIT_DELAY_S)
             self._pca9685_init()
+            self._controller_powered = True
 
         if (not enable and self._controller_powered):
-            GPIO.output(SERVO_ENABLE_PIN, GPIO.LOW)
             self._controller_powered = False
+            GPIO.output(SERVO_ENABLE_PIN, GPIO.LOW)
 
     def _constrain(self, min_value: int, value: int, max_value: int) -> int:
         """
@@ -309,37 +499,3 @@ class RQServos(object):
         """
 
         return max(min(value, max_value), min_value)
-
-    def _slow_motion(
-            self,
-            from_angle: int,
-            to_angle: int,
-            step_amount: int = ANGLE_STEP_DEG) -> int:
-        """
-        Since the servo controller doesn't provide a means to adjust
-        the speed of the servo angle change or to reduce the acceleration,
-        this method will limit the amount of angle change per cycle,
-        as a crude way of reducing the acceleration.
-        from_angle is the starting point and to_angle is the destination.
-        step_amount is the maximum angle to change per cycle.
-
-        The return value is the next angle for the servo.
-        """
-
-        if (not 0 <= from_angle <= 180
-                or not 0 <= to_angle <= 180):
-            raise MotionError("from or to out of range")
-
-        if from_angle == to_angle:
-            return to_angle
-
-        distance = from_angle - to_angle
-        if abs(distance) > step_amount:
-            if from_angle > to_angle:
-                next_position = from_angle - step_amount
-            else:
-                next_position = from_angle + step_amount
-        else:
-            next_position = to_angle
-
-        return next_position

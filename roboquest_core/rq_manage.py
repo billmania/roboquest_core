@@ -23,9 +23,9 @@ from std_srvs.srv import Empty
 from rq_msgs.srv import Control
 from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
-from rq_msgs.msg import ServoAngles
+from rq_msgs.msg import Servos
 
-VERSION = 20.1
+VERSION = 21
 
 JOYSTICK_MAX = 100
 #
@@ -48,6 +48,10 @@ INSTALL_DIR = '/usr/src/ros2ws/install'
 PERSIST_BASE_DIR = INSTALL_DIR + '/roboquest_core/share/roboquest_core'
 PERSIST_DIR = PERSIST_BASE_DIR + '/persist'
 SERVO_CONFIG = 'servos_config.json'
+COMMAND_IGNORE = 0
+COMMAND_ANGLE = 1
+COMMAND_INCR = 2
+COMMAND_SPEED = 3
 
 
 class RQManage(RQNode):
@@ -96,7 +100,10 @@ class RQManage(RQNode):
         #
         self._servo_config = ConfigFile(PERSIST_DIR)
         self._servo_config.init_config(SERVO_CONFIG, servo_config)
-        self._servos = RQServos(self._servo_config.get_config(SERVO_CONFIG))
+        self._servos = RQServos(
+            self._servo_config.get_config(SERVO_CONFIG),
+            self.get_logger,
+        )
 
         self._exit_timer = Timer(EXIT_DELAY_S, self._exit_worker)
 
@@ -111,16 +118,12 @@ class RQManage(RQNode):
         self.get_logger().fatal("_exit_worker: Calling kill")
         kill(getpid(), SIGKILL)
 
-    def _servo_cb(self, msg: ServoAngles) -> None:
+    def _servo_cb(self, msg: Servos) -> None:
         """
-        Extract the requested angle for each named servo and
-        send them to the servo controller. This method could need
-        a long time to run, dependent upon the configuration of the
-        servo delays and the quantity of servo commands in the
-        message.
-        Servo angle commands which are outside the configured
-        range of the servo are silently ignored. Commands to servos
-        which are currently disabled are silently ignored, too.
+        Extract the command for each servo and send them to the
+        servo controller. This method could need a long time to
+        run, dependent upon the configuration of the servo delays
+        and the quantity of servo commands in the message.
         """
 
         if not self._servos.controller_powered():
@@ -128,10 +131,32 @@ class RQManage(RQNode):
                                       throttle_duration_sec=60)
             return
 
-        # TODO: Refactor this into putting the commands in a queue
-        for servo in msg.servos:
+        for servo_id in self._servo_list:
+            servo = getattr(msg, servo_id)
+            if servo.command_type == COMMAND_IGNORE:
+                continue
+
             try:
-                self._servos.set_servo_angle(servo.name, servo.angle)
+                which_servo = servo_id.replace('servo', '')
+
+                if servo.command_type == COMMAND_ANGLE:
+                    self._servos.set_servo_angle(
+                        which_servo,
+                        servo.angle_deg)
+                elif servo.command_type == COMMAND_INCR:
+                    self._servos.incr_servo_angle(
+                        which_servo,
+                        servo.angle_incr_deg)
+                elif servo.command_type == COMMAND_SPEED:
+                    self.get_logger().info(
+                        '_servo_cb:'
+                        f' servo: {which_servo}'
+                        f' speed: {servo.speed_dps}'
+                    )
+                    self._servos.set_servo_speed(
+                        which_servo,
+                        servo.speed_dps
+                    )
 
             except TranslateError as e:
                 self.get_logger().warning(
@@ -170,9 +195,11 @@ class RQManage(RQNode):
                                       throttle_duration_sec=60)
             return
 
-        self.get_logger().debug("motor_cb"
-                                f" linear_x: {msg.twist.linear.x}"
-                                f", angular_z: {msg.twist.angular.z}")
+        self.get_logger().debug(
+            "motor_cb"
+            f" linear_x: {msg.twist.linear.x}"
+            f", angular_z: {msg.twist.angular.z}"
+        )
 
         #
         # The units for linear.x are meters per second and for angular.z
@@ -269,7 +296,16 @@ class RQManage(RQNode):
             'motor_speed',
             self._motor_speed_cb,
             1)
-        self._servo_sub = self.create_subscription(ServoAngles,
+        #
+        # Collect the servos specified in the Servos message,
+        # to optimize the callback.
+        #
+        self._servo_list = []
+        for servo in dir(Servos()):
+            if servo.find('servo') == 0:
+                self._servo_list.append(servo)
+
+        self._servo_sub = self.create_subscription(Servos,
                                                    'servos',
                                                    self._servo_cb,
                                                    1)

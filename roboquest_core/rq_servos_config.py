@@ -152,6 +152,9 @@ def servo_map_and_state(servo_list: List[dict]) -> (dict, list):
         name_map[servo['joint_name']] = servo
         servo_state_list.append(
             {'enabled': False,
-             'angle': servo['joint_angle_init_deg']})
+             'angle': servo['joint_angle_init_deg'],
+             'command_angle': None,
+             'command_dps': None,
+             'command_timestamp': None})
 
     return name_map, servo_state_list
