@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
 
 #
-# Send the UPDATE command to the RoboQuest software updater.
+# Send an action to the RoboQuest software updater.
+#
+# Usage is:
+#   update_cli.bash {action} {args}
 #
 
-VERSION=1
+VERSION=2
+
+ACTION="${1:-UPDATE}"
+shift 1
+ARGS=$*
+
 UPDATE_FIFO="/tmp/update_fifo"
-COMMAND="{\"timestamp\": $(date +%s), \"version\": ${VERSION}, \"action\": \"UPDATE\", \"args\": \"\"}"
+COMMAND="{\"timestamp\": $(date +%s), \"version\": ${VERSION}, \"action\": \"${ACTION}\", \"args\": \"${ARGS}\"}"
 
 if [[ -p "$UPDATE_FIFO" && -w "$UPDATE_FIFO" ]]
 then
         printf "$COMMAND" > $UPDATE_FIFO
-        printf "UPDATE command sent\n"
+        printf "${ACTION} command sent\n"
         exit 0
 fi
 
