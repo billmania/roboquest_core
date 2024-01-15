@@ -28,12 +28,16 @@ Files and directories:
     - systemd service with auto restart
 """
 
-VERSION = 12
+VERSION = 13
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
-RQ_CORE_PERSIST = '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist'
-RQ_UI_PERSIST = '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
+RQ_CORE_PERSIST = (
+    '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist'
+)
+RQ_UI_PERSIST = (
+    '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
+)
 OS_PERSIST = '/opt/persist'
 DIRECTORIES = [OS_PERSIST, '/opt/updater']
 CONFIG_FILES = ['configuration.json']
@@ -43,6 +47,7 @@ UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
 UPDATE_SCRIPT = 'updater.py'
 UPDATE_URL = 'http://registry.q4excellence.com:8079/' + UPDATE_SCRIPT
 LOOP_PERIOD_S = 10.0
+LONG_TIME = 60
 EOL = '\n'
 
 #
@@ -219,6 +224,23 @@ class RQUpdate(object):
             logging.warning('Failed to retrieve updater.py,'
                             f' status code {response.status_code}')
 
+    def _status_msg(self, msg: str) -> None:
+        """
+        Use the HAT screen 4 status message capability to display
+        msg. The HAT is opened and closed every time this method is
+        called, in order to minimize any conflict with rq_core.
+        """
+
+        _hat = RQHAT(
+            HAT_SERIAL,
+            38400,
+            7,
+            'N',
+            1,
+            1.0)
+        _hat.status_msg(msg)
+        _hat.close()
+
     def _get_latest_images(self):
         """
         This method kills any running containers and then
@@ -240,19 +262,12 @@ class RQUpdate(object):
             else:
                 container.kill()
 
-        self._hat = RQHAT(
-            HAT_SERIAL,
-            38400,
-            7,
-            'N',
-            1,
-            1.0)
-        self._hat.status_msg(f'updating rq')
+        self._status_msg('updating rq')
 
         self._client.containers.prune()
 
         for container_name in CONTAINERS:
-            self._hat.status_msg(f'checking {container_name}')
+            self._status_msg(f'checking {container_name}')
             image_name = CONTAINERS[container_name]['image_name']
             try:
                 image_local = self._client.images.get(image_name)
@@ -261,7 +276,7 @@ class RQUpdate(object):
 
             try:
                 logging.info(f"Pulling {image_name}")
-                self._hat.status_msg(f' on registry')
+                self._status_msg(' on registry')
                 image_registry = self._client.images.pull(
                     image_name,
                     tag='latest')
@@ -272,7 +287,7 @@ class RQUpdate(object):
                 logging.fatal(
                     f'Image {image_name}'
                     f", does not exist on the registry")
-                self._hat.status_msg(f' not available')
+                self._status_msg(' not available')
                 continue
 
             if not image_local:
@@ -291,7 +306,7 @@ class RQUpdate(object):
                     f" local: {image_local.labels['version']}"
                     f", registry {image_registry.labels['version']}")
 
-        self._hat.status_msg('rq updated')
+        self._status_msg('rq updated')
 
     def _update_images(self) -> None:
         """
@@ -306,13 +321,14 @@ class RQUpdate(object):
             self._setup_fifo()
 
             logging.info('update complete')
-            self._hat.status_msg('update complete')
+            self._status_msg('update complete')
             self._hat.close()
             self._hat = None
 
     def _process_message(self, message: str) -> None:
         """
-        Process the message received from the UI.
+        Process the message received from the UI. The defined
+        actions are : UPDATE, SHUTDOWN, REBOOT.
 
         The defined message:
             {
@@ -331,6 +347,12 @@ class RQUpdate(object):
         if command['action'].upper() == 'UPDATE':
             logging.info('UPDATE command with args: <%s>', command['args'])
             self._update_images()
+        elif command['action'].upper() == 'SHUTDOWN':
+            logging.info('SHUTDOWN command with args: <%s>', command['args'])
+            self._shutdown_cb('SHUTDOWN')
+        elif command['action'].upper() == 'REBOOT':
+            logging.info('REBOOT command with args: <%s>', command['args'])
+            self._reboot_cb('REBOOT')
         else:
             logging.warning('Unrecognized command message: %s', message)
 
@@ -518,19 +540,36 @@ class RQUpdate(object):
 
     def _shutdown_cb(self, arg):
         """
-        Called when the shutdown control signal has been detected.
+        Called when the shutdown control signal has been detected and
+        when the SHUTDOWN command is received.
         """
 
-        logging.info(f"Shutdown triggered via pin {arg}")
+        self._status_msg('shutdown start')
+        logging.info(f"Shutdown triggered")
         os.system('systemctl halt')
-        logging.info('Shutdown command issued')
 
         #
         # Pause here for a bit, so updater.py doesn't try
         # to restart the containers after the OS is trying
         # to stop the docker daemon.
         #
-        LONG_TIME = 60
+        sleep(LONG_TIME)
+        logging.warn('Woke unexpectedly from sleep')
+
+    def _reboot_cb(self, arg):
+        """
+        Called when the REBOOT command is received.
+        """
+
+        self._status_msg('reboot start')
+        logging.info(f"Reboot triggered")
+        os.system('systemctl reboot')
+
+        #
+        # Pause here for a bit, so updater.py doesn't try
+        # to restart the containers after the OS is trying
+        # to stop the docker daemon.
+        #
         sleep(LONG_TIME)
         logging.warn('Woke unexpectedly from sleep')
 
