@@ -21,6 +21,7 @@ from roboquest_core.rq_hat import TELEM_HEADER, SCREEN_HEADER
 from roboquest_core.rq_hat import HAT_SCREEN, HAT_BUTTON
 from std_srvs.srv import Empty
 from rq_msgs.srv import Control
+from rq_msgs.srv import ServicesTopics
 from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import Servos
@@ -52,6 +53,8 @@ COMMAND_IGNORE = 0
 COMMAND_ANGLE = 1
 COMMAND_INCR = 2
 COMMAND_SPEED = 3
+
+SEPARATOR = '/'
 
 
 class RQManage(RQNode):
@@ -241,6 +244,31 @@ class RQManage(RQNode):
         self._exit_timer.start()
         return response
 
+    def _services_topics_cb(self, request, response):
+        """
+        Retrieve the lists of available services and topics, with
+        their respective interface, and return them in the response.
+        """
+
+        self.get_logger().info('_services_topics_cb')
+
+        for service in self.get_service_names_and_types():
+            if service[0][1:].find(SEPARATOR) > -1:
+                continue
+
+            response.services.append(
+                f"{service[0][1:]}:{service[1][0]}"
+            )
+        for topic in self.get_topic_names_and_types():
+            if topic[0][1:].find(SEPARATOR) > -1:
+                continue
+
+            response.topics.append(
+                f"{topic[0][1:]}:{topic[1][0]}"
+            )
+
+        return response
+
     def _control_cb(self, request, response):
         """
         Implement the control_hat service. Valid values for each
@@ -312,6 +340,10 @@ class RQManage(RQNode):
         self._control_srv = self.create_service(Control,
                                                 'control_hat',
                                                 self._control_cb)
+        self._services_topics_srv = self.create_service(
+            ServicesTopics,
+            'services_topics',
+            self._services_topics_cb)
         self._restart_srv = self.create_service(Empty,
                                                 'restart',
                                                 self._restart_cb)
