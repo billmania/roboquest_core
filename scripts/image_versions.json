@@ -1,0 +1,10 @@
+{
+  "registry.q4excellence.com:5678/rq_core":  {
+    "name": "rq_core",
+    "version": "v23"
+  },
+  "registry.q4excellence.com:5678/rq_ui": {
+    "name": "rq_ui",
+    "version": "v34"
+  }
+}

@@ -24,11 +24,11 @@ Required modules (on the host OS) are:
     - requests
 
 Files and directories:
-    - /opt/updater/updater.log
+    - UPDATER_DIR/updater.log
     - systemd service with auto restart
 """
 
-VERSION = 13
+VERSION = 14
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -38,12 +38,16 @@ RQ_CORE_PERSIST = (
 RQ_UI_PERSIST = (
     '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
 )
-OS_PERSIST = '/opt/persist'
-DIRECTORIES = [OS_PERSIST, '/opt/updater']
+OS_PERSIST_DIR = '/opt/persist'
+UPDATER_DIR = '/opt/updater'
+DIRECTORIES = [OS_PERSIST_DIR, UPDATER_DIR]
 CONFIG_FILES = ['configuration.json']
-UPDATE_LOG = '/opt/updater/updater.log'
+UPDATE_LOG = UPDATER_DIR + '/updater.log'
 UPDATE_FIFO = '/tmp/update_fifo'
 UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
+FIRMWARE_VERSION = 'http://registry.q4excellence.com:8079/firmware_version.txt'
+IMAGE_VERSIONS = 'http://registry.q4excellence.com:8079/image_versions.json'
+ALL_VERSIONS = OS_PERSIST_DIR + '/versions.json'
 UPDATE_SCRIPT = 'updater.py'
 UPDATE_URL = 'http://registry.q4excellence.com:8079/' + UPDATE_SCRIPT
 LOOP_PERIOD_S = 10.0
@@ -67,7 +71,7 @@ CONTAINERS = {
         'volumes': ['/dev/shm:/dev/shm',
                     '/var/run/dbus:/var/run/dbus',
                     '/run/udev:/run/udev:ro',
-                    '/opt/persist:'+RQ_CORE_PERSIST,
+                    OS_PERSIST_DIR+':'+RQ_CORE_PERSIST,
                     'ros_logs:/root/.ros/log']},
     'rq_ui': {
         'image_name': 'registry.q4excellence.com:5678/rq_ui',
@@ -75,7 +79,7 @@ CONTAINERS = {
         'devices': [],
         'volumes': ['/dev/shm:/dev/shm',
                     UPDATE_FIFO+':'+UPDATE_FIFO,
-                    '/opt/persist:'+RQ_UI_PERSIST,
+                    OS_PERSIST_DIR+':'+RQ_UI_PERSIST,
                     'ros_logs:/root/.ros/log']}
 }
 
@@ -103,7 +107,8 @@ class RQUpdate(object):
         self._messages = list()
         self._client = None
         self._fifo = None
-        self._updater_version = None
+        self._latest_updater_version = None
+        self._latest_image_versions = None
 
         self._fifo_path = fifo_path
 
@@ -181,16 +186,19 @@ class RQUpdate(object):
         """
         Confirm network connectivity is available and appears stable.
         """
-        # TODO: Implement check for electrical
-
         result = True
 
         response = get(UPDATE_VERSION, timeout=10.0)
         if response.status_code == 200:
-            self._updater_version = int(response.text)
+            self._latest_updater_version = int(response.text)
         else:
             logging.warning("Network connectivity requirements not met")
             result = False
+        response = get(FIRMWARE_VERSION, timeout=10.0)
+        if response.status_code == 200:
+            self._latest_firmware_version = response.text[:-1]
+        else:
+            self._latest_firmware_version = 'Unknown'
 
         return result
 
@@ -202,6 +210,9 @@ class RQUpdate(object):
         """
 
         if VERSION == self._updater_version:
+            logging.info(
+                f"_update_updater: version {VERSION} is already the latest"
+            )
             return
 
         self.close_fifo()
@@ -229,6 +240,7 @@ class RQUpdate(object):
         Use the HAT screen 4 status message capability to display
         msg. The HAT is opened and closed every time this method is
         called, in order to minimize any conflict with rq_core.
+        Incidentally, the HAT does not persist status messages.
         """
 
         _hat = RQHAT(
@@ -243,13 +255,10 @@ class RQUpdate(object):
 
     def _get_latest_images(self):
         """
-        This method kills any running containers and then
-        instantiates the RQHAT() class, in order to use the screen
-        4 status display.
+        This method kills any running containers and then instantiates
+        the RQHAT() class, in order to use the screen 4 status display.
         Docker doesn't provide a mechanism to compare the version of a
-        local image to the version on a registry. The registry image
-        must be pulled and then compared via some user-defined version
-        identifier.
+        local image to the version on a registry.
         """
 
         for container_name in CONTAINERS:
@@ -465,8 +474,8 @@ class RQUpdate(object):
         """
 
         logging.info(f"Attempting to restore {config_file}")
-        config_file_path = Path(OS_PERSIST) / config_file
-        old_config_file_path = Path(OS_PERSIST) / (config_file + '.old')
+        config_file_path = Path(OS_PERSIST_DIR) / config_file
+        old_config_file_path = Path(OS_PERSIST_DIR) / (config_file + '.old')
 
         if old_config_file_path.exists():
             try:
@@ -481,6 +490,84 @@ class RQUpdate(object):
 
         return
 
+    def _get_installed_image_versions(self) -> list[tuple[str, str]]:
+        """
+        Query the installed images and retrieve their "version"
+        LABEL. Return a list of tuples containing the name and
+        version for each image.
+        """
+
+        installed_images = list()
+        for container_name in CONTAINERS:
+            image = self._client.images.get(
+                CONTAINERS[container_name]['image_name']
+            )
+            installed_images.append((container_name, image.labels['version']))
+
+        return installed_images
+
+    def _write_version_object(self) -> None:
+        """
+        Collect the versions of the local images. Including
+        self._updater_version, self._firmware_version, and
+        self._latest_image_versions, create and write ALL_VERSIONS.
+        """
+
+        all_versions = {
+            'installed': {
+                'updater': VERSION
+            },
+            'latest': {
+                'firmware': self._latest_firmware_version,
+                'updater': self._latest_updater_version
+            }
+        }
+
+        installed_image_versions = self._get_installed_image_versions()
+        for image in installed_image_versions:
+            all_versions['installed'][image[0]] = image[1]
+        # TODO: Retrieve current firmware version from HAT
+        all_versions['installed']['firmware'] = 'Unknown'
+        all_versions['installed']['updater'] = VERSION
+        for image in self._latest_image_versions:
+            image_details = self._latest_image_versions[image]
+            all_versions['latest'][image_details['name']] = (
+                image_details['version']
+            )
+
+        with open(ALL_VERSIONS, 'w') as f:
+            f.write(json.dumps(all_versions))
+        return
+
+    def _publish_versions(self):
+        """
+        Called once when this script starts, before any containers are
+        started. It's  expected this method will usually fail, because the
+        robot usually does NOT have Internet connectivity.
+
+        It extracts the "version" label from the local Docker images, the
+        files UPDATE_VERSION and IMAGE_VERSIONS from the registry, and
+        the VERSION constant from this script. All of that information is used
+        to create ALL_VERSIONS.
+        When images are updated, it's expected that this script will be
+        restarted after the updates complete.
+        """
+
+        if self._requirements_met():
+            #
+            # Network connectivity exists and the latest version
+            # string for updater.py is in self._updater_version.
+            #
+            response = get(IMAGE_VERSIONS, timeout=10.0)
+            if response.status_code == 200:
+                self._latest_image_versions = json.loads(response.text)
+            else:
+                logging.warning("Failed to retrieve IMAGE_VERSIONS")
+
+        self._write_version_object()
+
+        return
+
     def _check_configs(self, restore: bool = False) -> None:
         """
         Monitor configuration files for:
@@ -491,13 +578,13 @@ class RQUpdate(object):
         If restore is True, attempt to restore the config file
         with the old version.
         Uses CONFIG_FILES for a list of configuration file base
-        names to be found in OS_PERSIST directory. The configuration
+        names to be found in OS_PERSIST_DIR directory. The configuration
         files must be JSON strings and must have the "version"
         attribute at their top level.
         """
 
         for config_file in CONFIG_FILES:
-            config_file_path = Path(OS_PERSIST) / config_file
+            config_file_path = Path(OS_PERSIST_DIR) / config_file
 
             if config_file_path.exists():
                 if config_file_path.stat().st_size > 0:
@@ -526,6 +613,7 @@ class RQUpdate(object):
         a command to update the containers.
         """
 
+        self._publish_versions()
         self._check_configs(restore=True)
 
         while True:
@@ -545,7 +633,7 @@ class RQUpdate(object):
         """
 
         self._status_msg('shutdown start')
-        logging.info(f"Shutdown triggered")
+        logging.info("Shutdown triggered")
         os.system('systemctl halt')
 
         #
@@ -562,7 +650,7 @@ class RQUpdate(object):
         """
 
         self._status_msg('reboot start')
-        logging.info(f"Reboot triggered")
+        logging.info("Reboot triggered")
         os.system('systemctl reboot')
 
         #
