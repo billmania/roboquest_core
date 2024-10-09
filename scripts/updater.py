@@ -43,6 +43,7 @@ UPDATER_DIR = '/opt/updater'
 DIRECTORIES = [OS_PERSIST_DIR, UPDATER_DIR]
 CONFIG_FILES = ['configuration.json']
 UPDATE_LOG = UPDATER_DIR + '/updater.log'
+UPDATE_IN_PROGRESS = UPDATER_DIR + '/update_in_progress'
 UPDATE_FIFO = '/tmp/update_fifo'
 UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
 FIRMWARE_VERSION = 'http://registry.q4excellence.com:8079/firmware_version.txt'
@@ -116,6 +117,34 @@ class RQUpdate(object):
         self._setup_docker()
         self._remove_old_images()
         self._setup_fifo()
+
+    def _update_in_progress(self) -> bool:
+        """
+        Test whether an update was in progress before this script restarted.
+        """
+
+        if Path(UPDATE_IN_PROGRESS).exists():
+            return True
+
+        return False
+
+    def _reset_update_in_progress(self) -> None:
+        """
+        Indicate there isn't an update in progress.
+        """
+
+        Path(UPDATE_IN_PROGRESS).unlink(missing_ok=True)
+
+        return
+
+    def _set_update_in_progress(self) -> None:
+        """
+        Indicate there is an update in progress.
+        """
+
+        Path(UPDATE_IN_PROGRESS).touch(mode=0o444)
+
+        return
 
     def _setup_shutdown(self):
         """
@@ -209,14 +238,16 @@ class RQUpdate(object):
         Exit and allow systemd to restart it.
         """
 
-        if VERSION == self._updater_version:
+        if VERSION == self._latest_updater_version:
             logging.info(
                 f"_update_updater: version {VERSION} is already the latest"
             )
             return
 
         self.close_fifo()
-        logging.info(f'Replacing {VERSION} with {self._updater_version}')
+        logging.info(
+            f'Replacing {VERSION} with {self._latest_updater_version}'
+        )
         try:
             Path(UPDATE_SCRIPT).replace(UPDATE_SCRIPT+'.old')
 
@@ -230,6 +261,8 @@ class RQUpdate(object):
             Path(UPDATE_SCRIPT).chmod(0o554)
             logging.info('updater.py replaced')
             logging.warning('updater.py exiting')
+            self._set_update_in_progress()
+
             exit(0)
         else:
             logging.warning('Failed to retrieve updater.py,'
@@ -326,13 +359,12 @@ class RQUpdate(object):
         if self._requirements_met():
             self.close_fifo()
             self._update_updater()
+            self._reset_update_in_progress()
             self._get_latest_images()
             self._setup_fifo()
 
             logging.info('update complete')
             self._status_msg('update complete')
-            self._hat.close()
-            self._hat = None
 
     def _process_message(self, message: str) -> None:
         """
@@ -508,9 +540,8 @@ class RQUpdate(object):
 
     def _write_version_object(self) -> None:
         """
-        Collect the versions of the local images. Including
-        self._updater_version, self._firmware_version, and
-        self._latest_image_versions, create and write ALL_VERSIONS.
+        Collect the versions of the installed images and other components.
+        Create and write ALL_VERSIONS.
         """
 
         all_versions = {
@@ -615,6 +646,9 @@ class RQUpdate(object):
 
         self._publish_versions()
         self._check_configs(restore=True)
+
+        if self._update_in_progress():
+            self._update_images()
 
         while True:
             self._check_running_containers()
