@@ -132,7 +132,7 @@ class RQHAT(object):
         self._screen_page = 0
         self._status_lines = list()
 
-        self.status_msg('HAT setup')
+        self.status_msg('System status')
 
     def close(self):
         """

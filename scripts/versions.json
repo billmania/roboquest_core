@@ -1,0 +1,14 @@
+{
+    "installed": {
+        "rq_core": "v23",
+        "rq_ui": "v34",
+        "updater": "13",
+        "firmware": "6.1"
+    },
+    "available": {
+        "rq_core": "v23",
+        "rq_ui": "v34",
+        "updater": "14",
+        "firmware": "6.1"
+    }
+}
