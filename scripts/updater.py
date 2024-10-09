@@ -110,6 +110,7 @@ class RQUpdate(object):
         self._fifo = None
         self._latest_updater_version = None
         self._latest_image_versions = None
+        self._status_messages = list()
 
         self._fifo_path = fifo_path
 
@@ -273,7 +274,9 @@ class RQUpdate(object):
         Use the HAT screen 4 status message capability to display
         msg. The HAT is opened and closed every time this method is
         called, in order to minimize any conflict with rq_core.
-        Incidentally, the HAT does not persist status messages.
+        Incidentally, the HAT does not persist status messages, so
+        this method persists them and overrides an internal RQHAT
+        variable.
         """
 
         _hat = RQHAT(
@@ -283,15 +286,16 @@ class RQUpdate(object):
             'N',
             1,
             1.0)
+        _hat._status_lines = self._status_messages
         _hat.status_msg(msg)
+        self._status_messages = _hat._status_lines
         _hat.close()
 
     def _get_latest_images(self):
         """
-        This method kills any running containers and then instantiates
-        the RQHAT() class, in order to use the screen 4 status display.
-        Docker doesn't provide a mechanism to compare the version of a
-        local image to the version on a registry.
+        This method kills any running containers. Docker doesn't provide a
+        mechanism to compare the version of a local image to the version on
+        a registry.
         """
 
         for container_name in CONTAINERS:
@@ -303,9 +307,6 @@ class RQUpdate(object):
 
             else:
                 container.kill()
-
-        self._status_msg('updating rq')
-
         self._client.containers.prune()
 
         for container_name in CONTAINERS:
@@ -317,11 +318,19 @@ class RQUpdate(object):
                 image_local = None
 
             try:
-                logging.info(f"Pulling {image_name}")
-                self._status_msg(' on registry')
+                logging.info(
+                    f"Pulling {image_name}"
+                    f" {self._latest_image_versions[image_name]['version']}"
+                    " from the registry"
+                )
+                self._status_msg(
+                    f" pull {container_name}"
+                    f" {self._latest_image_versions[image_name]['version']}"
+                )
                 image_registry = self._client.images.pull(
                     image_name,
                     tag='latest')
+
             except docker.errors.ImageNotFound:
                 image_registry = None
 
@@ -348,7 +357,7 @@ class RQUpdate(object):
                     f" local: {image_local.labels['version']}"
                     f", registry {image_registry.labels['version']}")
 
-        self._status_msg('rq updated')
+        self._status_msg('image update complete')
 
     def _update_images(self) -> None:
         """
@@ -387,12 +396,15 @@ class RQUpdate(object):
 
         if command['action'].upper() == 'UPDATE':
             logging.info('UPDATE command with args: <%s>', command['args'])
+            self._status_msg('UPDATE')
             self._update_images()
         elif command['action'].upper() == 'SHUTDOWN':
             logging.info('SHUTDOWN command with args: <%s>', command['args'])
+            self._status_msg('SHUTDOWN')
             self._shutdown_cb('SHUTDOWN')
         elif command['action'].upper() == 'REBOOT':
             logging.info('REBOOT command with args: <%s>', command['args'])
+            self._status_msg('REBOOT')
             self._reboot_cb('REBOOT')
         else:
             logging.warning('Unrecognized command message: %s', message)
@@ -644,12 +656,15 @@ class RQUpdate(object):
         a command to update the containers.
         """
 
+        self._status_msg(f'updater v{VERSION}')
         self._publish_versions()
         self._check_configs(restore=True)
 
         if self._update_in_progress():
+            self._status_msg('resuming update')
             self._update_images()
 
+        self._status_msg('starting RoboQuest')
         while True:
             self._check_running_containers()
             self._check_configs(restore=False)
