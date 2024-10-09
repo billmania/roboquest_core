@@ -2,7 +2,7 @@
 
 import os
 from sys import exit
-from pathlib import Path
+from pathlib import Path, PurePath
 from requests import get
 import logging
 import json
@@ -43,6 +43,9 @@ UPDATER_DIR = '/opt/updater'
 DIRECTORIES = [OS_PERSIST_DIR, UPDATER_DIR]
 CONFIG_FILES = ['configuration.json']
 UPDATE_LOG = UPDATER_DIR + '/updater.log'
+LOG_SERVER_PID_FILE = UPDATER_DIR + '/log_server_pid'
+LOG_SERVER_PORT = 8080
+LOG_LINES = 100
 UPDATE_IN_PROGRESS = UPDATER_DIR + '/update_in_progress'
 UPDATE_FIFO = '/tmp/update_fifo'
 UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
@@ -118,6 +121,64 @@ class RQUpdate(object):
         self._setup_docker()
         self._remove_old_images()
         self._setup_fifo()
+
+    def _start_log_server(self):
+        """
+        Create a daemon process to serve the updater log file. A daemon
+        process is used so it can outlive its parent.
+        """
+
+        from multiprocessing import Process
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from os import kill, chdir
+        from signal import SIGKILL
+
+        def log_server_task(working_directory):
+            chdir(working_directory)
+
+            class LogServer(BaseHTTPRequestHandler):
+                def do_GET(self):
+
+                    if not Path('.' + self.path).exists():
+                        self.send_response(404)
+                        self.end_headers()
+
+                        return
+
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/plain')
+                    self.end_headers()
+
+                    with open('.' + self.path, 'r') as f:
+                        for entry in (f.readlines()[-LOG_LINES:]):
+                            self.wfile.write(
+                                bytes(entry, 'utf-8')
+                            )
+
+            log_server = HTTPServer(
+                ('', LOG_SERVER_PORT),
+                LogServer
+            )
+            log_server.serve_forever()
+
+        if Path(LOG_SERVER_PID_FILE).exists():
+            with open(LOG_SERVER_PID_FILE, 'r') as f:
+                log_server_pid = f.read()
+
+            try:
+                kill(int(log_server_pid), SIGKILL)
+            except Exception:
+                pass
+
+        log_server = Process(
+            target=log_server_task,
+            daemon=True,
+            args=(PurePath(UPDATE_LOG).parent,)
+        )
+        log_server.start()
+        Path(LOG_SERVER_PID_FILE).touch()
+        with open(LOG_SERVER_PID_FILE, 'w') as f:
+            f.write(f'{log_server.pid}')
 
     def _update_in_progress(self) -> bool:
         """
@@ -657,6 +718,7 @@ class RQUpdate(object):
         """
 
         self._status_msg(f'updater v{VERSION}')
+        self._start_log_server()
         self._publish_versions()
         self._check_configs(restore=True)
 
