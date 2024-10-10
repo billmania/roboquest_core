@@ -28,7 +28,7 @@ Files and directories:
     - systemd service with auto restart
 """
 
-VERSION = 14
+VERSION = 15
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -44,7 +44,7 @@ DIRECTORIES = [OS_PERSIST_DIR, UPDATER_DIR]
 CONFIG_FILES = ['configuration.json']
 UPDATE_LOG = UPDATER_DIR + '/updater.log'
 LOG_SERVER_PID_FILE = UPDATER_DIR + '/log_server_pid'
-LOG_SERVER_PORT = 8080
+LOG_SERVER_PORT = 8444
 LOG_LINES = 100
 UPDATE_IN_PROGRESS = UPDATER_DIR + '/update_in_progress'
 UPDATE_FIFO = '/tmp/update_fifo'
@@ -53,7 +53,12 @@ FIRMWARE_VERSION = 'http://registry.q4excellence.com:8079/firmware_version.txt'
 IMAGE_VERSIONS = 'http://registry.q4excellence.com:8079/image_versions.json'
 ALL_VERSIONS = OS_PERSIST_DIR + '/versions.json'
 UPDATE_SCRIPT = 'updater.py'
-UPDATE_URL = 'http://registry.q4excellence.com:8079/' + UPDATE_SCRIPT
+URL_BASE = 'http://registry.q4excellence.com:8079/'
+UPDATE_URL = URL_BASE + UPDATE_SCRIPT
+CERT_FILE = UPDATER_DIR + '/cert.pem'
+KEY_FILE = UPDATER_DIR + '/key.pem'
+CERT_FILE_URL = URL_BASE + 'cert.pem'
+KEY_FILE_URL = URL_BASE + 'key.pem'
 LOOP_PERIOD_S = 10.0
 LONG_TIME = 60
 EOL = '\n'
@@ -99,6 +104,7 @@ class RQUpdate(object):
         """
 
         self._make_dirs(DIRECTORIES)
+        # TODO: Replace with Python RotatingFileHandler
         logging.basicConfig(
             filename=UPDATE_LOG,
             format='%(asctime)s %(levelname)s %(message)s',
@@ -130,15 +136,21 @@ class RQUpdate(object):
 
         from multiprocessing import Process
         from http.server import BaseHTTPRequestHandler, HTTPServer
+        from ssl import SSLContext, PROTOCOL_TLSv1_2
         from os import kill, chdir
         from signal import SIGKILL
 
         def log_server_task(working_directory):
             chdir(working_directory)
 
+            def get_ssl_context(certfile, keyfile):
+                context = SSLContext(PROTOCOL_TLSv1_2)
+                context.load_cert_chain(certfile, keyfile)
+                context.set_ciphers("@SECLEVEL=1:ALL")
+                return context
+
             class LogServer(BaseHTTPRequestHandler):
                 def do_GET(self):
-
                     if not Path('.' + self.path).exists():
                         self.send_response(404)
                         self.end_headers()
@@ -147,6 +159,7 @@ class RQUpdate(object):
 
                     self.send_response(200)
                     self.send_header('Content-type', 'text/plain')
+                    self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
 
                     with open('.' + self.path, 'r') as f:
@@ -158,6 +171,11 @@ class RQUpdate(object):
             log_server = HTTPServer(
                 ('', LOG_SERVER_PORT),
                 LogServer
+            )
+            context = get_ssl_context(CERT_FILE, KEY_FILE)
+            log_server.socket = context.wrap_socket(
+                log_server.socket,
+                server_side=True
             )
             log_server.serve_forever()
 
@@ -272,6 +290,37 @@ class RQUpdate(object):
             return message
 
         return None
+
+    def _update_other_files(self):
+        """
+        Retrieve other files from the registry, which are required by
+        updater.py.
+        """
+
+        success = True
+        if not Path(CERT_FILE).exists():
+            cert_file = get(CERT_FILE_URL, timeout=10.0)
+            if cert_file.status_code == 200:
+                Path(CERT_FILE).touch(mode=0o440)
+                with open(CERT_FILE, 'w') as f:
+                    f.write(cert_file.text)
+            else:
+                logging.warning(f'Failed to install {CERT_FILE}')
+                success = False
+
+        if not Path(KEY_FILE).exists():
+            key_file = get(KEY_FILE_URL, timeout=10.0)
+            if key_file.status_code == 200:
+                Path(KEY_FILE).touch(mode=0o440)
+                with open(KEY_FILE, 'w') as f:
+                    f.write(key_file.text)
+            else:
+                logging.warning(f'Failed to install {KEY_FILE}')
+                success = False
+
+        if not success:
+            self._status_msg('Failed to install cert and/or key file')
+            self._status_msg('Check Internet connection')
 
     def _requirements_met(self) -> bool:
         """
@@ -718,6 +767,7 @@ class RQUpdate(object):
         """
 
         self._status_msg(f'updater v{VERSION}')
+        self._update_other_files()
         self._start_log_server()
         self._publish_versions()
         self._check_configs(restore=True)
