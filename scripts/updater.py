@@ -102,18 +102,12 @@ class RQUpdate(object):
         """
 
         self._make_dirs(DIRECTORIES)
-        # TODO: Replace with Python RotatingFileHandler
-        # TODO: Don't truncate updater.log
+        # TODO: Preserve the last N lines of UPDATE_LOG
         logging.basicConfig(
             filename=UPDATE_LOG,
             format='%(asctime)s %(levelname)s %(message)s',
             level=logging.INFO)
-
-        self._ros_domain_id = self._get_ros_domain_id()
-
-        self._messages = list()
-        self._client = None
-        self._fifo = None
+        logging.info(f"updater.py version {VERSION} started")
 
         #
         # A safety flag, to ensure the HAT serial port isn't touched
@@ -121,13 +115,18 @@ class RQUpdate(object):
         #
         self._containers_running = False
 
+        self._status_messages = list()
+        self._status_msg(f'updater.py version {VERSION}')
+
+        self._ros_domain_id = self._get_ros_domain_id()
+        logging.info(f'{self._ros_domain_id}')
+
+        self._messages = list()
+        self._client = None
+        self._fifo = None
+
         self._latest_updater_version = None
         self._latest_image_versions = None
-
-        self._status_messages = list()
-        logging.info(f"updater.py version {VERSION} started")
-        logging.info(f'Set ROS domain: {self._ros_domain_id}')
-        self._status_msg(f'updater.py version {VERSION}')
 
         self._fifo_path = fifo_path
 
@@ -147,6 +146,8 @@ class RQUpdate(object):
         from ssl import SSLContext, PROTOCOL_TLSv1_2
         from os import kill, chdir
         from signal import SIGKILL
+
+        logging.info('Configuring log server')
 
         def log_server_task(working_directory):
             chdir(working_directory)
@@ -211,9 +212,9 @@ class RQUpdate(object):
         logging.info('Starting log server')
         log_server.start()
 
-        Path(LOG_SERVER_PID_FILE).touch()
-        with open(LOG_SERVER_PID_FILE, 'w') as f:
+        with open(LOG_SERVER_PID_FILE, 'w+') as f:
             f.write(f'{log_server.pid}')
+        logging.info(f'Log server running as {log_server.pid}')
 
     def _update_in_progress(self) -> bool:
         """
@@ -221,7 +222,6 @@ class RQUpdate(object):
         """
 
         if Path(UPDATE_IN_PROGRESS).exists():
-            logging.info('resuming UPDATE already in progress')
             return True
 
         return False
@@ -797,7 +797,7 @@ class RQUpdate(object):
         self._check_configs(restore=True)
 
         if self._update_in_progress():
-            logging.info('resuming update')
+            logging.info('resuming update in progress')
             self._update_images()
 
         logging.info('starting RoboQuest')
