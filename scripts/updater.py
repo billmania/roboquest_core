@@ -55,10 +55,8 @@ ALL_VERSIONS = OS_PERSIST_DIR + '/versions.json'
 UPDATE_SCRIPT = 'updater.py'
 URL_BASE = 'http://registry.q4excellence.com:8079/'
 UPDATE_URL = URL_BASE + UPDATE_SCRIPT
-CERT_FILE = UPDATER_DIR + '/cert.pem'
-KEY_FILE = UPDATER_DIR + '/key.pem'
-CERT_FILE_URL = URL_BASE + 'cert.pem'
-KEY_FILE_URL = URL_BASE + 'key.pem'
+CERT_FILE = 'cert.pem'
+KEY_FILE = 'key.pem'
 LOOP_PERIOD_S = 10.0
 LONG_TIME = 60
 EOL = '\n'
@@ -105,21 +103,31 @@ class RQUpdate(object):
 
         self._make_dirs(DIRECTORIES)
         # TODO: Replace with Python RotatingFileHandler
+        # TODO: Don't truncate updater.log
         logging.basicConfig(
             filename=UPDATE_LOG,
             format='%(asctime)s %(levelname)s %(message)s',
             level=logging.INFO)
-        logging.info(f"updater.py version {VERSION} started")
 
         self._ros_domain_id = self._get_ros_domain_id()
-        logging.info(f'Set ROS domain: {self._ros_domain_id}')
 
         self._messages = list()
         self._client = None
         self._fifo = None
+
+        #
+        # A safety flag, to ensure the HAT serial port isn't touched
+        # when any containers are running.
+        #
+        self._containers_running = False
+
         self._latest_updater_version = None
         self._latest_image_versions = None
+
         self._status_messages = list()
+        logging.info(f"updater.py version {VERSION} started")
+        logging.info(f'Set ROS domain: {self._ros_domain_id}')
+        self._status_msg(f'updater.py version {VERSION}')
 
         self._fifo_path = fifo_path
 
@@ -172,7 +180,10 @@ class RQUpdate(object):
                 ('', LOG_SERVER_PORT),
                 LogServer
             )
-            context = get_ssl_context(CERT_FILE, KEY_FILE)
+            context = get_ssl_context(
+                UPDATER_DIR + '/' + CERT_FILE,
+                UPDATER_DIR + '/' + KEY_FILE
+            )
             log_server.socket = context.wrap_socket(
                 log_server.socket,
                 server_side=True
@@ -180,20 +191,26 @@ class RQUpdate(object):
             log_server.serve_forever()
 
         if Path(LOG_SERVER_PID_FILE).exists():
+            logging.warning('Stopping previous log server')
             with open(LOG_SERVER_PID_FILE, 'r') as f:
                 log_server_pid = f.read()
 
             try:
                 kill(int(log_server_pid), SIGKILL)
             except Exception:
-                pass
+                logging.warning(
+                    f'Failed to stop previous log server {int(log_server_pid)}'
+                )
+            Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
 
         log_server = Process(
             target=log_server_task,
             daemon=True,
             args=(PurePath(UPDATE_LOG).parent,)
         )
+        logging.info('Starting log server')
         log_server.start()
+
         Path(LOG_SERVER_PID_FILE).touch()
         with open(LOG_SERVER_PID_FILE, 'w') as f:
             f.write(f'{log_server.pid}')
@@ -204,6 +221,7 @@ class RQUpdate(object):
         """
 
         if Path(UPDATE_IN_PROGRESS).exists():
+            logging.info('resuming UPDATE already in progress')
             return True
 
         return False
@@ -298,28 +316,22 @@ class RQUpdate(object):
         """
 
         success = True
-        if not Path(CERT_FILE).exists():
-            cert_file = get(CERT_FILE_URL, timeout=10.0)
-            if cert_file.status_code == 200:
-                Path(CERT_FILE).touch(mode=0o440)
-                with open(CERT_FILE, 'w') as f:
-                    f.write(cert_file.text)
-            else:
-                logging.warning(f'Failed to install {CERT_FILE}')
-                success = False
 
-        if not Path(KEY_FILE).exists():
-            key_file = get(KEY_FILE_URL, timeout=10.0)
-            if key_file.status_code == 200:
-                Path(KEY_FILE).touch(mode=0o440)
-                with open(KEY_FILE, 'w') as f:
-                    f.write(key_file.text)
-            else:
-                logging.warning(f'Failed to install {KEY_FILE}')
-                success = False
+        for other_file in [CERT_FILE, KEY_FILE]:
+            other_file_path = UPDATER_DIR + '/' + other_file
+            if not Path(other_file_path).exists():
+                file_content = get(URL_BASE + other_file, timeout=10.0)
+                if file_content.status_code == 200:
+                    Path(other_file_path).touch(mode=0o440)
+                    with open(other_file_path, 'w') as f:
+                        f.write(file_content.text)
+                    logging.info(f'Installed {other_file_path}')
+                else:
+                    logging.warning(f'Failed to install {other_file_path}')
+                    success = False
 
         if not success:
-            self._status_msg('Failed to install cert and/or key file')
+            self._status_msg('Other files install failed')
             self._status_msg('Check Internet connection')
 
     def _requirements_met(self) -> bool:
@@ -350,14 +362,11 @@ class RQUpdate(object):
         """
 
         if VERSION == self._latest_updater_version:
-            logging.info(
-                f"_update_updater: version {VERSION} is already the latest"
-            )
             return
 
         self.close_fifo()
         logging.info(
-            f'Replacing {VERSION} with {self._latest_updater_version}'
+            f'Replacing updater {VERSION} with {self._latest_updater_version}'
         )
         try:
             Path(UPDATE_SCRIPT).replace(UPDATE_SCRIPT+'.old')
@@ -370,8 +379,12 @@ class RQUpdate(object):
             with open(UPDATE_SCRIPT, 'w') as f:
                 f.write(response.text)
             Path(UPDATE_SCRIPT).chmod(0o554)
-            logging.info('updater.py replaced')
+            logging.info(
+                f'updater.py upgraded to {self._latest_updater_version}'
+            )
             logging.warning('updater.py exiting')
+            self.stop_containers()
+            self._status_msg('updater.py exiting')
             self._set_update_in_progress()
 
             exit(0)
@@ -389,6 +402,10 @@ class RQUpdate(object):
         variable.
         """
 
+        if self._containers_running:
+            logging.warning('_status_msg: containers running')
+            return
+
         _hat = RQHAT(
             HAT_SERIAL,
             38400,
@@ -401,13 +418,12 @@ class RQUpdate(object):
         self._status_messages = _hat._status_lines
         _hat.close()
 
-    def _get_latest_images(self):
+    def stop_containers(self):
         """
-        This method kills any running containers. Docker doesn't provide a
-        mechanism to compare the version of a local image to the version on
-        a registry.
+        Kill any running containers.
         """
 
+        logging.info('Stopping containers')
         for container_name in CONTAINERS:
             try:
                 container = self._client.containers.get(container_name)
@@ -417,10 +433,21 @@ class RQUpdate(object):
 
             else:
                 container.kill()
+                logging.info(f'Stopped {container_name}')
+
+        self._containers_running = False
+        logging.info('Containers stopped')
         self._client.containers.prune()
 
+    def _get_latest_images(self):
+        """
+        Docker doesn't provide a mechanism to compare the version of a local
+        image to the version on a registry.
+        """
+        self.stop_containers()
+
         for container_name in CONTAINERS:
-            self._status_msg(f'checking {container_name}')
+            logging.info(f'checking {container_name}')
             image_name = CONTAINERS[container_name]['image_name']
             try:
                 image_local = self._client.images.get(image_name)
@@ -433,10 +460,6 @@ class RQUpdate(object):
                     f" {self._latest_image_versions[image_name]['version']}"
                     " from the registry"
                 )
-                self._status_msg(
-                    f" pull {container_name}"
-                    f" {self._latest_image_versions[image_name]['version']}"
-                )
                 image_registry = self._client.images.pull(
                     image_name,
                     tag='latest')
@@ -447,8 +470,8 @@ class RQUpdate(object):
             if not image_local and not image_registry:
                 logging.fatal(
                     f'Image {image_name}'
-                    f", does not exist on the registry")
-                self._status_msg(' not available')
+                    f", does not exist on the registry"
+                )
                 continue
 
             if not image_local:
@@ -467,7 +490,7 @@ class RQUpdate(object):
                     f" local: {image_local.labels['version']}"
                     f", registry {image_registry.labels['version']}")
 
-        self._status_msg('image update complete')
+        logging.info('image updates complete')
 
     def _update_images(self) -> None:
         """
@@ -482,8 +505,8 @@ class RQUpdate(object):
             self._get_latest_images()
             self._setup_fifo()
 
-            logging.info('update complete')
-            self._status_msg('update complete')
+            logging.info('update process complete')
+            self._status_msg('update process complete')
 
     def _process_message(self, message: str) -> None:
         """
@@ -555,6 +578,8 @@ class RQUpdate(object):
                 images_exist = False
 
         if images_exist:
+            self._containers_running = True
+
             for container_name in to_start:
                 image_name = CONTAINERS[container_name]['image_name']
                 try:
@@ -627,7 +652,7 @@ class RQUpdate(object):
         the rq_ui container to install a default config file.
         """
 
-        logging.info(f"Attempting to restore {config_file}")
+        logging.warn(f"Attempting to restore {config_file}")
         config_file_path = Path(OS_PERSIST_DIR) / config_file
         old_config_file_path = Path(OS_PERSIST_DIR) / (config_file + '.old')
 
@@ -715,7 +740,7 @@ class RQUpdate(object):
             if response.status_code == 200:
                 self._latest_image_versions = json.loads(response.text)
             else:
-                logging.warning("Failed to retrieve IMAGE_VERSIONS")
+                logging.warning(f"Failed to retrieve {IMAGE_VERSIONS}")
 
         self._write_version_object()
 
@@ -766,16 +791,16 @@ class RQUpdate(object):
         a command to update the containers.
         """
 
-        self._status_msg(f'updater v{VERSION}')
         self._update_other_files()
         self._start_log_server()
         self._publish_versions()
         self._check_configs(restore=True)
 
         if self._update_in_progress():
-            self._status_msg('resuming update')
+            logging.info('resuming update')
             self._update_images()
 
+        logging.info('starting RoboQuest')
         self._status_msg('starting RoboQuest')
         while True:
             self._check_running_containers()
@@ -793,8 +818,9 @@ class RQUpdate(object):
         when the SHUTDOWN command is received.
         """
 
-        self._status_msg('shutdown start')
-        logging.info("Shutdown triggered")
+        logging.warn("Shutdown triggered")
+        self.stop_containers()
+        self._status_msg('Shutdown triggered')
         os.system('systemctl halt')
 
         #
@@ -810,8 +836,9 @@ class RQUpdate(object):
         Called when the REBOOT command is received.
         """
 
-        self._status_msg('reboot start')
         logging.info("Reboot triggered")
+        self.stop_containers()
+        self._status_msg('Reboot triggered')
         os.system('systemctl reboot')
 
         #
@@ -851,4 +878,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         rq_update.close_fifo()
 
+    rq_update.stop_containers()
     logging.warning('Shutdown')
