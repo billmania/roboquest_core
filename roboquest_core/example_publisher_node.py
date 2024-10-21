@@ -10,6 +10,10 @@ from rclpy.node import Node
 
 from std_msgs.msg import Float32
 
+TEMPERATURE_FILE = '/sys/class/thermal/thermal_zone0/temp'
+TIMER_PERIOD_S = 5
+MILLIS_PER_S = 1000
+
 
 class ExamplePublisher(Node):
     """ExamplePublisher.
@@ -21,13 +25,13 @@ class ExamplePublisher(Node):
         """Create the publisher and the timer."""
         super().__init__('example_publisher')
         self._publisher_ = self.create_publisher(Float32, 'example', 1)
-        timer_period = 0.5  # seconds
-        self.timer = self.create_timer(timer_period, self._timer_callback)
+        self.timer = self.create_timer(TIMER_PERIOD_S, self._timer_callback)
         self.i = 0
 
     def _timer_callback(self):
         msg = Float32()
-        msg.data = 0.0
+        with open(TEMPERATURE_FILE, 'r') as t:
+            msg.data = int(t.read()) / MILLIS_PER_S
         self._publisher_.publish(msg)
 
 
