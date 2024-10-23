@@ -1,7 +1,11 @@
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
+
+from pathlib import Path
 
 def generate_launch_description():
     base_params = os.path.join(
@@ -69,9 +73,28 @@ def generate_launch_description():
         respawn=False
     )
 
-    return LaunchDescription([rq_base_node,
-                              rq_camera_node0,
-                              rq_camera_node1,
-                              rq_camera_node2,
-                              rq_camera_node3
-                             ])
+    USER_LAUNCH_FILE = (
+        '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist' +
+        '/nodes' +
+        '/user_nodes.launch.py'
+    )
+
+    if Path(USER_LAUNCH_FILE).exists():
+        user_nodes = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource([USER_LAUNCH_FILE])
+        )
+
+        return LaunchDescription([rq_base_node,
+                                  rq_camera_node0,
+                                  rq_camera_node1,
+                                  rq_camera_node2,
+                                  rq_camera_node3,
+                                  user_nodes
+                                 ])
+    else:
+        return LaunchDescription([rq_base_node,
+                                  rq_camera_node0,
+                                  rq_camera_node1,
+                                  rq_camera_node2,
+                                  rq_camera_node3
+                                 ])
