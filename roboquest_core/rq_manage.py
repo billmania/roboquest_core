@@ -25,7 +25,7 @@ from rq_msgs.msg import Telemetry
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import Servos
 
-VERSION = '23'
+VERSION = '24rc1'
 
 JOYSTICK_MAX = 100
 #

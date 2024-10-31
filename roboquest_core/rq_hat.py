@@ -1,7 +1,10 @@
+"""Manage the HAT."""
 from enum import Enum
 from typing import Callable, Tuple
-import serial
+
 import RPi.GPIO as GPIO
+
+import serial
 
 VERSION = 2
 
@@ -26,9 +29,7 @@ COLUMNS = LINE_LENGTH - len(EOL)
 
 
 class HAT_GPIO_PIN(Enum):
-    """
-    Pins for controlling features of the HAT.
-    """
+    """Pins for controlling features of the HAT."""
 
     COMMS_ENABLE = 22
     FET_1_ENABLE = 24
@@ -38,7 +39,8 @@ class HAT_GPIO_PIN(Enum):
 
 
 class HAT_SCREEN(Enum):
-    """
+    """Manage the UI screen.
+
     There are a total of five screens available from the HAT. Two of
     the screens can have multiple pages.
     The information on screens HOME and ABOUT comes directly from the HAT.
@@ -65,7 +67,8 @@ class HAT_SCREEN(Enum):
 
 
 class HAT_BUTTON(Enum):
-    """
+    """Manage the UI buttons.
+
     The PREVIOUS_PAGE and NEXT_PAGE buttons cycle through the pages of
     a screen. The ENTER button is the command to select or enable the
     item currently displayed on the screen. For the update cycle SCREEN
@@ -81,7 +84,8 @@ class HAT_BUTTON(Enum):
 
 
 class RQHAT(object):
-    """
+    """Manage the complete HAT.
+
     Manages the operation of the HAT, via a serial port. Even
     though motor and servo control is implemented on the HAT,
     they're managed by other classes.
@@ -113,6 +117,7 @@ class RQHAT(object):
                  stop_bits: int,
                  read_timeout_sec: float,
                  serial_errors_cb: Callable = None):
+        """Initialize the HAT."""
         self._serial_errors_cb = serial_errors_cb
 
         self._hat = None
@@ -130,16 +135,16 @@ class RQHAT(object):
                               stop_bits,
                               read_timeout_sec)
         self._screen_page = 0
-        self._status_lines = list()
+        self._status_lines = []
 
         self.status_msg('System status')
 
     def close(self):
-        """
+        """Close the serial port.
+
         Close the serial port and cleanup the GPIO. This method is not intended
         for internal use.
         """
-
         self._hat.close()
         GPIO.cleanup()
 
@@ -171,10 +176,7 @@ class RQHAT(object):
             self._hat = None
 
     def write_sentence(self, sentence: str) -> None:
-        """
-        Encode from ASCII and then write the sentence.
-        """
-
+        """Encode from ASCII and then write the sentence."""
         if 0 < len(sentence):
             bytes_to_write = bytearray(sentence, 'ascii')
             try:
@@ -188,17 +190,17 @@ class RQHAT(object):
         return None
 
     def read_sentence(self) -> str:
-        """
+        """Read a single sentence.
+
         Read one sentence from the serial port or timeout. Return
         the sentence after stripping the READ_EOL.
 
         One second's worth of data from the HAT looks like
-        the following. Every line is terminated with \r\n:
+        the following. Every line is terminated with CR-LF:
 
-$$TELEM 12.39 0.13 0.05 1.67 1.68 1.69 1.70 0.00 1
-$$SCREEN 1 0
+        $$TELEM 12.39 0.13 0.05 1.67 1.68 1.69 1.70 0.00 1
+        $$SCREEN 1 0
         """
-
         try:
             sentence = self._hat.read_until(
                 expected=READ_EOL)
@@ -214,6 +216,7 @@ $$SCREEN 1 0
         return None
 
     def cleanup_gpio(self):
+        """Close the GPIO device."""
         if self._controls_state['charger'] == 'ENABLED':
             GPIO.output(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.HIGH)
             self._controls_state['charger'] = 'DISABLED'
@@ -230,11 +233,11 @@ $$SCREEN 1 0
         GPIO.cleanup()
 
     def control_comms(self, enable: bool = False):
-        """
+        """Enable and disable comms.
+
         Used to enable and disable the flow of serial data from the HAT.
         Disabling the communications causes the input buffer to be reset.
         """
-
         new_state = 'ENABLED' if enable else 'DISABLED'
         if self._controls_state['comms'] != new_state:
             new_pin_output = GPIO.HIGH if enable else GPIO.LOW
@@ -273,12 +276,12 @@ $$SCREEN 1 0
         GPIO.setup(HAT_GPIO_PIN.CHARGER_POWERED.value, GPIO.IN)
 
     def charger_state(self) -> Tuple[bool, bool]:
-        """
+        """Return charger state.
+
         Return two booleans indicating if;
             - the battery is being charged
             - the charger has power
         """
-
         power_pin = GPIO.input(HAT_GPIO_PIN.CHARGER_POWERED.value)
         charger_has_power = True if power_pin == GPIO.HIGH else False
 
@@ -295,6 +298,7 @@ $$SCREEN 1 0
         return battery_charging, charger_has_power
 
     def charger_control(self, on: bool = False) -> None:
+        """Control the charger."""
         new_state = 'ENABLED' if on else 'DISABLED'
         if self._controls_state['charger'] != new_state:
             #
@@ -305,6 +309,7 @@ $$SCREEN 1 0
             self._controls_state['charger'] = new_state
 
     def fet1_control(self, on: bool = False) -> None:
+        """Control FET 1."""
         new_state = 'ENABLED' if on else 'DISABLED'
         if self._controls_state['fet_1'] != new_state:
             new_pin_output = GPIO.HIGH if on else GPIO.LOW
@@ -312,6 +317,7 @@ $$SCREEN 1 0
             self._controls_state['fet_1'] = new_state
 
     def fet2_control(self, on: bool = False) -> None:
+        """Control FET 2."""
         new_state = 'ENABLED' if on else 'DISABLED'
         if self._controls_state['fet_2'] != new_state:
             new_pin_output = GPIO.HIGH if on else GPIO.LOW
@@ -319,12 +325,12 @@ $$SCREEN 1 0
             self._controls_state['fet_2'] = new_state
 
     def status_msg(self, message: str) -> None:
-        """
+        """Add a status message.
+
         Show a status message on the HAT OLED screen 4. message cannot contain
         EOL characters and cannot be longer than LINE_LENGTH characters. The
         most recent LINES messages will be shown on screen 4.
         """
-
         status = self.pad_line(message.replace(EOL, ' ')[:LINE_LENGTH])
         self._status_lines.append(status)
         if len(self._status_lines) > LINES:
@@ -333,10 +339,7 @@ $$SCREEN 1 0
         self.show_status_msgs()
 
     def show_status_msgs(self) -> None:
-        """
-        Display the status messages collected by status_msg().
-        """
-
+        """Display the status messages collected by status_msg()."""
         status_text = ''
         for line in self._status_lines:
             status_text += line
@@ -349,16 +352,17 @@ $$SCREEN 1 0
         self.write_sentence(status_output)
 
     def pad_line(self, text: str) -> str:
-        """
+        """Pad a status line.
+
         Return a string which contains text, left-justified, and
         then right-padded with enough PAD_CHARs and one trailing
         EOL to make the string length equal to COLUMNS.
         """
-
         return text.ljust(COLUMNS, PAD_CHAR) + EOL
 
     def pad_text(self, text) -> str:
-        """
+        """Pad collection of text.
+
         Pad text to a total of LINES lines of text by adding
         four blank lines to the end of text and then truncating
         the result to DISPLAY_LENGTH characters.
@@ -366,5 +370,4 @@ $$SCREEN 1 0
         This is done primarily to ensure a shorter new text completely
         overwrites a longer, older text.
         """
-
         return (text + self.pad_line('') * LINES)[:DISPLAY_LENGTH] + EOB

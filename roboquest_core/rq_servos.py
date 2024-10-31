@@ -123,10 +123,12 @@ class RQServos(object):
         self._servo_period.start()
 
     def _setup_gpio(self) -> None:
-        """
-        Initialize the GPIO subsystem.
-        """
+        """Initialize the GPIO subsystem.
 
+        Initialize the GPIO subsystem. This class does not have exclusive
+        control of the GPIO subsystem.
+        """
+        GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(SERVO_ENABLE_PIN, GPIO.OUT)
         GPIO.output(SERVO_ENABLE_PIN, GPIO.LOW)
