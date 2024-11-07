@@ -1,29 +1,42 @@
-from typing import List
-from threading import Timer
-from os import kill, getpid
+"""Manage the core functionality of the RoboQuest backend.
+
+Control the features of the HAT, provide the ROS services and topics.
+"""
+
+from os import getpid, kill
 from signal import SIGKILL
-from rclpy.parameter import Parameter
-from rclpy import spin_once as ROSspin_once
-from rclpy import shutdown as ROSshutdown
-import rclpy.logging
+from threading import Timer
+from typing import List
+
 import diagnostic_msgs
+
 from geometry_msgs.msg import TwistStamped
 
-from roboquest_core.rq_node import RQNode
+import rclpy.logging
+from rclpy import shutdown as ROSshutdown
+from rclpy import spin_once as ROSspin_once
+from rclpy.parameter import Parameter
+
 from roboquest_core.rq_config_file import ConfigFile
+from roboquest_core.rq_gpio_user import PinError, USER_GPIO_PIN, UserGPIO
+from roboquest_core.rq_hat import HAT_BUTTON, HAT_SCREEN
 from roboquest_core.rq_hat import RQHAT
-from roboquest_core.rq_motors import RQMotors, MAX_MOTOR_RPM
-from roboquest_core.rq_servos_config import servo_config
-from roboquest_core.rq_servos import RQServos
-from roboquest_core.rq_servos import TranslateError, ServoError
+from roboquest_core.rq_hat import SCREEN_HEADER, TELEM_HEADER
+from roboquest_core.rq_motors import MAX_MOTOR_RPM, RQMotors
 from roboquest_core.rq_network import RQNetwork
-from roboquest_core.rq_hat import TELEM_HEADER, SCREEN_HEADER
-from roboquest_core.rq_hat import HAT_SCREEN, HAT_BUTTON
-from std_srvs.srv import Empty
-from rq_msgs.srv import Control
-from rq_msgs.msg import Telemetry
+from roboquest_core.rq_node import RQNode
+from roboquest_core.rq_servos import RQServos
+from roboquest_core.rq_servos import ServoError, TranslateError
+from roboquest_core.rq_servos_config import servo_config
+
+from rq_msgs.msg import GPIOInput
+from rq_msgs.msg import GPIOOutput
 from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import Servos
+from rq_msgs.msg import Telemetry
+from rq_msgs.srv import Control
+
+from std_srvs.srv import Empty
 
 VERSION = '24rc1'
 
@@ -55,7 +68,8 @@ COMMAND_SPEED = 3
 
 
 class RQManage(RQNode):
-    """
+    """Manage the ROS framework.
+
     The node which manages the RoboQuest application. It contains
     all of the logic specific to management and use of the
     RoboQuest HAT.
@@ -65,6 +79,7 @@ class RQManage(RQNode):
 
     def __init__(self,
                  node_name: str = 'RQManage'):
+        """Initialize the object."""
         super().__init__(node_name)
         rclpy.logging.set_logger_level(
             node_name,
@@ -92,6 +107,7 @@ class RQManage(RQNode):
             self._hat.pad_line,
             self._hat.pad_text)
         self._motors = RQMotors()
+        self._gpio = UserGPIO()
 
         #
         # servo_config() provides a default servo configuration. It's
@@ -108,26 +124,69 @@ class RQManage(RQNode):
         self._exit_timer = Timer(EXIT_DELAY_S, self._exit_worker)
 
     def _exit_worker(self):
-        """
+        """Terminate the worker.
+
         Call the exit() function to terminate the node. This method
         of terminating the node does NOT perform a clean shutdown.
         Any in-flight ROS publishes, subscribes, or service calls
         may be incomplete.
         """
-
-        self.get_logger().fatal("_exit_worker: Calling kill")
+        self.get_logger().fatal('_exit_worker: Calling kill')
         kill(getpid(), SIGKILL)
 
-    def _servo_cb(self, msg: Servos) -> None:
+    def _gpio_output_cb(self, msg: GPIOOutput) -> None:
+        """Handle a GPIO configuration and output command.
+
+        Extract the contents of the GPIOOutput message. Use the _direction
+        parts to configure the GPIO pins as one of: input, output, or
+        idle. Use the _state parts to determine how to set each pin
+        configured as an output.
         """
+        for gpio_pin in USER_GPIO_PIN:
+            direction = getattr(msg, gpio_pin.name+'_direction')
+            if direction == GPIOOutput.INPUT:
+                try:
+                    self._gpio.make_input(gpio_pin)
+                except PinError:
+                    self.get_logger().warning(
+                        '_gpio_output_cb: make_input PinError'
+                    )
+            elif direction == GPIOOutput.OUTPUT:
+                try:
+                    self._gpio.make_output(gpio_pin)
+                except PinError:
+                    self.get_logger().warning(
+                        '_gpio_output_cb: make_output PinError'
+                    )
+
+                try:
+                    self._gpio.set_pin(
+                        gpio_pin,
+                        getattr(msg, gpio_pin.name+'_state')
+                    )
+                except PinError:
+                    self.get_logger().warning(
+                        '_gpio_output_cb: set_pin PinError'
+                    )
+
+            elif direction == GPIOOutput.UNUSED:
+                try:
+                    self._gpio.clear_pin(gpio_pin)
+                except PinError:
+                    self.get_logger().warning(
+                        '_gpio_output_cb: clear_pin PinError'
+                    )
+
+    def _servo_cb(self, msg: Servos) -> None:
+        """Handle a servo command.
+
         Extract the command for each servo and send them to the
         servo controller. This method could need a long time to
         run, dependent upon the configuration of the servo delays
         and the quantity of servo commands in the message.
         """
-
         if not self._servos.controller_powered():
-            self.get_logger().warning("servos are not enabled",
+            self.get_logger().warning('servos are not enabled',
                                       throttle_duration_sec=60)
             return
 
@@ -160,45 +219,42 @@ class RQManage(RQNode):
 
             except TranslateError as e:
                 self.get_logger().warning(
-                    f"_servo_cb: {e}",
+                    f'_servo_cb: {e}',
                     throttle_duration_sec=60)
 
             except ServoError as e:
                 self.get_logger().warning(
-                    f"_servo_cb: {e}",
+                    f'_servo_cb: {e}',
                     throttle_duration_sec=60)
 
     def _motor_speed_cb(self, msg: MotorSpeed):
-        """
-        Set the maximum motor speed.
-        """
-
+        """Set the maximum motor speed."""
         if not (0 <= msg.max_rpm <= MAX_MOTOR_RPM):
             self.get_logger().error(
-                "motor_speed_cb"
-                f" max: {msg.max_rpm} must be in [0, {MAX_MOTOR_RPM}]")
+                'motor_speed_cb'
+                f' max: {msg.max_rpm} must be in [0, {MAX_MOTOR_RPM}]')
             return
 
         self._motors.set_motor_max_rpm(msg.max_rpm)
-        self.get_logger().debug("motor_speed_cb"
-                                f" max: {msg.max_rpm}")
+        self.get_logger().debug('motor_speed_cb'
+                                f' max: {msg.max_rpm}')
 
     def _motor_cb(self, msg: TwistStamped):
-        """
+        """Handle a motor command.
+
         Extract the linear.x and angular.z from the Twist message,
         convert it to an x and y RPM, and pass it to the
         motors controller.
         """
-
         if not self._motors.motors_are_enabled():
-            self.get_logger().warning("motors are not enabled",
+            self.get_logger().warning('motors are not enabled',
                                       throttle_duration_sec=60)
             return
 
         self.get_logger().debug(
-            "motor_cb"
-            f" linear_x: {msg.twist.linear.x}"
-            f", angular_z: {msg.twist.angular.z}"
+            'motor_cb'
+            f' linear_x: {msg.twist.linear.x}'
+            f', angular_z: {msg.twist.angular.z}'
         )
 
         #
@@ -219,16 +275,17 @@ class RQManage(RQNode):
             # left turn
             right_velocity -= angular_velocity
             left_velocity += angular_velocity
-        self.get_logger().debug("motor_cb"
-                                f" right_velocity: {right_velocity}"
-                                f", left_velocity: {left_velocity}")
+        self.get_logger().debug('motor_cb'
+                                f' right_velocity: {right_velocity}'
+                                f', left_velocity: {left_velocity}')
 
         if not self._motors.set_motors_rpm(right=round(right_velocity),
                                            left=round(left_velocity)):
-            self.get_logger().warning("failed to set motors RPM")
+            self.get_logger().warning('failed to set motors RPM')
 
     def _restart_cb(self, request, response):
-        """
+        """Handle a restart command.
+
         Cause the node to exit, in order to have some other daemon
         automatically restart it. This is usually done to load an
         updated configuration.
@@ -242,7 +299,8 @@ class RQManage(RQNode):
         return response
 
     def _control_cb(self, request, response):
-        """
+        """Handle a control command.
+
         Implement the control_hat service. Valid values for each
         attribute of the interface are: ON and OFF. Any other value
         is ignored.
@@ -281,11 +339,12 @@ class RQManage(RQNode):
         return response
 
     def _setup_ros_graph(self):
-        """
+        """Connect to the ROS graph.
+
         Setup the publishers, subscribers, and services.
         """
-
         self._telemetry_pub = self.create_publisher(Telemetry, 'telemetry', 1)
+        self._gpio_pub = self.create_publisher(GPIOInput, 'gpio_input', 1)
         self._motor_sub = self.create_subscription(
             TwistStamped,
             'cmd_vel',
@@ -309,6 +368,10 @@ class RQManage(RQNode):
                                                    'servos',
                                                    self._servo_cb,
                                                    1)
+        self._gpio_sub = self.create_subscription(GPIOOutput,
+                                                  'gpio_output',
+                                                  self._gpio_output_cb,
+                                                  1)
         self._control_srv = self.create_service(Control,
                                                 'control_hat',
                                                 self._control_cb)
@@ -331,15 +394,47 @@ class RQManage(RQNode):
             parameters=parameter_declarations
         )
 
-        parameter_names = list()
+        parameter_names = []
         for parameter in parameter_declarations:
             parameter_names.append(parameter[0])
         parameters = self.get_parameters(parameter_names)
-        self._parameters = dict()
+        self._parameters = {}
         for index, name in enumerate(parameter_names):
             self._parameters[name] = parameters[index].value
-            self.get_logger().info(f"Parameter {name}:"
-                                   f" {self._parameters[name]}")
+            self.get_logger().info(f'Parameter {name}:'
+                                   f' {self._parameters[name]}')
+
+    def _publish_gpio(self):
+        """Publish the current state of each GPIO input pin.
+
+        Read the current list of GPIO pins configured as input
+        and publish a message with each pins current state.
+        """
+        try:
+            input_pins = self._gpio.read_input_pins()
+        except PinError:
+            self.get_logger().warning(
+                '_publish_gpio: PinError for read_input_pins'
+            )
+            return
+
+        if not input_pins:
+            self.get_logger().info('_publish_gpio: No inputs to publish',
+                                   throttle_duration_sec=5.0)
+            return
+
+        gpio_msg = GPIOInput()
+        gpio_msg.header.stamp = self.get_clock().now().to_msg()
+
+        for gpio_pin in input_pins:
+            self.get_logger().info(
+                '_publish_gpio:'
+                + f' {gpio_pin[0].name} = {gpio_pin[1]}',
+                throttle_duration_sec=5.0
+            )
+            setattr(gpio_msg, gpio_pin[0].name, gpio_pin[1])
+
+        self._gpio_pub.publish(gpio_msg)
 
     def _publish_telemetry(self, fields: List[str]) -> None:
         telemetry_msg = Telemetry()
@@ -362,10 +457,7 @@ class RQManage(RQNode):
         self._telemetry_pub.publish(telemetry_msg)
 
     def _process_sentence(self, sentence: str):
-        """
-        Determine if it's a SCREEN or a TELEM sentence.
-        """
-
+        """Determine if it's a SCREEN or a TELEM sentence."""
         if sentence:
             fields = sentence.split()
 
@@ -383,7 +475,7 @@ class RQManage(RQNode):
 
                     except Exception as e:
                         self.get_logger().warning(
-                            f"SCREEN_HEADER Exception: {e}")
+                            f'SCREEN_HEADER Exception: {e}')
                         return
 
                     if (screen != self._previous_screen
@@ -404,35 +496,32 @@ class RQManage(RQNode):
 
                     return
 
-        self.get_logger().warning(f"Unusable sentence {sentence}",
+        self.get_logger().warning(f'Unusable sentence {sentence}',
                                   throttle_duration_sec=60)
         self._sentence_errors += 1
 
     def _diags_cb(self, statuses):
-        """
-        Called by the diagnostics_updater utility.
-        """
-
+        """Assemble the collection of diagnostics."""
         # TODO: Use something more informative for the Status
         statuses.summary(
             diagnostic_msgs.msg.DiagnosticStatus.OK,
             'Telemetry')
-        statuses.add('telem_sentences', f"{self._telem_sentences}")
-        statuses.add('screen_sentences', f"{self._screen_sentences}")
-        statuses.add('sentence_errors', f"{self._sentence_errors}")
+        statuses.add('telem_sentences', f'{self._telem_sentences}')
+        statuses.add('screen_sentences', f'{self._screen_sentences}')
+        statuses.add('sentence_errors', f'{self._sentence_errors}')
 
         return statuses
 
     def main(self):
-        """
-        Setup the serial port and then read incoming sentences in a loop.
-        """
+        """Configure the serial port.
 
-        self.get_logger().info(f"{self._node_name} v{VERSION} starting")
+        Configure and then read incoming sentences in a loop.
+        """
+        self.get_logger().info(f'{self._node_name} v{VERSION} starting')
         self.setup_diags(diags_cb=self._diags_cb)
 
-        self.get_logger().info(f"{self._node_name} spinning"
-                               f" with timeout {self._timeout_sec}")
+        self.get_logger().info(f'{self._node_name} spinning'
+                               f' with timeout {self._timeout_sec}')
 
         self._hat.control_comms(enable=True)
         self._hat.charger_control(on=True)
@@ -444,6 +533,8 @@ class RQManage(RQNode):
             if sentence:
                 self._process_sentence(sentence)
 
-        self.get_logger().info(f"{self._node_name} stopping")
+            self._publish_gpio()
+
+        self.get_logger().info(f'{self._node_name} stopping')
         self.destroy_node()
         ROSshutdown()

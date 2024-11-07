@@ -11,11 +11,11 @@ class USER_GPIO_PIN(Enum):
     These are BCM numbers, not board numbers.
     """
 
-    GPIO6 = 6
-    GPIO16 = 16
-    GPIO19 = 19
-    GPIO20 = 20
-    GPIO26 = 26
+    gpio6 = 6
+    gpio16 = 16
+    gpio19 = 19
+    gpio20 = 20
+    gpio26 = 26
 
 
 class PinError(Exception):
@@ -56,9 +56,9 @@ class UserGPIO(object):
             return
 
         if pin in self._output_pins:
-            self._output_pins.remove()
+            self._output_pins.remove(pin)
         else:
-            self._input_pins.remove()
+            self._input_pins.remove(pin)
 
         GPIO.cleanup(pin.value)
         self._unused_pins.add(pin)
@@ -72,15 +72,12 @@ class UserGPIO(object):
 
         if pin in self._unused_pins:
             self._unused_pins.remove(pin)
-            self._output_pins.add(pin)
-            GPIO.setup(pin.value, GPIO.OUT)
         else:
             if pin in self._input_pins:
-                error = f'{pin.name} already set as input'
-            else:
-                error = f'{pin.name} already set as output'
+                self._input_pins.remove(pin)
 
-            raise PinError(error)
+        self._output_pins.add(pin)
+        GPIO.setup(pin.value, GPIO.OUT)
 
     def make_input(
          self,
@@ -91,15 +88,12 @@ class UserGPIO(object):
 
         if pin in self._unused_pins:
             self._unused_pins.remove(pin)
-            self._input_pins.add(pin)
-            GPIO.setup(pin.value, GPIO.IN)
         else:
-            if pin in self._input_pins:
-                error = f'{pin.name} already set as input'
-            else:
-                error = f'{pin.name} already set as output'
+            if pin in self._output_pins:
+                self._output_pins.remove(pin)
 
-            raise PinError(error)
+        self._input_pins.add(pin)
+        GPIO.setup(pin.value, GPIO.IN)
 
     def set_pin(self, pin: USER_GPIO_PIN, state: int = GPIO.LOW) -> Exception:
         """Set the value of an output pin.
