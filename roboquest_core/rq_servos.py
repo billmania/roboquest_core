@@ -1,12 +1,14 @@
-from typing import Union, List
+"""Manage a collection of servos."""
+from threading import Event, Lock, Thread
 from time import sleep, time
-from threading import Thread, Lock, Event
-
-import smbus2
+from typing import List, Union
 
 import RPi.GPIO as GPIO
-from roboquest_core.rq_servos_config import servo_map_and_state
+
 from roboquest_core.rq_servos_config import SERVO_QTY, Servo
+from roboquest_core.rq_servos_config import servo_map_and_state
+
+import smbus2
 
 SERVO_ENABLE_PIN = 23
 I2C_BUS_ID = 1
@@ -53,34 +55,27 @@ SETUPS = [(MODE2_REG, OUTDRV_VALUE),
 
 
 class ServoError(Exception):
-    """
-    General errors with servos.
-    """
+    """Report general errors with servos."""
 
     pass
 
 
 class TranslateError(Exception):
-    """
-    Errors in calls to or operation of the _translate() method.
-    """
+    """Report translation errors with the _translate() method."""
 
     pass
 
 
 class RQServos(object):
-    """
-    Manages the operation of the PCA9685 controller connected to the I2C
-    bus.
-    """
+    """Manage the PCA9685 controller bus."""
 
     def __init__(self, servos_list: List[dict], ros_logger=None):
-        """
+        """Initialize for servos.
+
         Setup communication with the servo sub-system. The PCA9685 I2C
         servo controller isn't configured until it's powered and then
         each time the power is cycled.
         """
-
         self._write_errors = 0
 
         self._servos_list = servos_list
@@ -134,31 +129,28 @@ class RQServos(object):
         GPIO.output(SERVO_ENABLE_PIN, GPIO.LOW)
 
     def _setup_i2c(self) -> None:
-        """
-        Initialize the I2C bus.
-        """
-
+        """Initialize for I2C communication."""
         self._bus = smbus2.SMBus(I2C_BUS_ID)
 
     def _translate(self,
                    input_value: int,
                    input_min: int, input_max: int,
                    output_min: int, output_max: int) -> int:
-        """
+        """Translate an input_value to an output range.
+
         input_value must be in the range [input_min, input_max].
         Map input_value onto the range [output_min, output_max].
         Return the mapped value.
         """
-
         if not output_min < output_max:
-            raise TranslateError("output range error"
-                                 f" range {output_min}, {output_max}")
+            raise TranslateError('output range error'
+                                 f' range {output_min}, {output_max}')
         if not input_min < input_max:
-            raise TranslateError("input range error"
-                                 f" range {input_min}, {input_max}")
+            raise TranslateError('input range error'
+                                 f' range {input_min}, {input_max}')
         if not input_min <= input_value <= input_max:
-            raise TranslateError(f"input_value {input_value} not within"
-                                 f" range {input_min}, {input_max}")
+            raise TranslateError(f'input_value {input_value} not within'
+                                 f' range {input_min}, {input_max}')
 
         return ((input_value - input_min) * (output_max - output_min)
                 / (input_max - input_min) + output_min)
@@ -168,11 +160,11 @@ class RQServos(object):
             channel: int,
             on_count: int,
             off_count: int) -> None:
-        """
-        Command the servo with a specific PWM signal, which was calculated
+        """Command the servo.
+
+        Set a specific PWM signal, which was calculated
         based on a desired angle.
         """
-
         with self._servo_lock:
             self._bus.write_byte_data(I2C_DEVICE_ID,
                                       PULSE0_ON_L_REG+4*channel,
@@ -191,19 +183,19 @@ class RQServos(object):
             self,
             channel: Union[int, str]
             ) -> Servo:
-        """
+        """Get a servo object.
+
         Using the channel as key, retrieve and return the servo
         object.
         """
-
         try:
             channel_number = int(channel)
             if 0 <= channel_number < SERVO_QTY:
                 servo = self._servos_list[channel_number]
             else:
                 raise ServoError(
-                    f"set_servo_angle: {channel_number} must be"
-                    f" between 0 and {SERVO_QTY}"
+                    f'set_servo_angle: {channel_number} must be'
+                    f' between 0 and {SERVO_QTY}'
                 )
 
         except ValueError:
@@ -211,22 +203,23 @@ class RQServos(object):
                 servo = self._servo_name_map[channel]
             else:
                 raise ServoError(
-                    f"set_servo_angle: {channel} not a recognized servo name"
+                    f'set_servo_angle: {channel} not a recognized servo name'
                 )
 
         return servo
 
     def _time_servos(self) -> None:
-        """
+        """Emit a servo_changed event.
+
         Set the _servo_changed Event every MOVE_PERIOD_S seconds.
         """
-
         while True:
             self._servo_changed.set()
             sleep(MOVE_PERIOD_S)
 
     def _move_servos(self) -> None:
-        """
+        """Change the position of a servo.
+
         Executed by a separate thread and controlled by an Event.
 
         Loops through self._servos_state_list to set the commanded angles
@@ -240,7 +233,6 @@ class RQServos(object):
         speed, this method calls set_servo_speed() to update the
         command_angle.
         """
-
         while True:
             self._servo_changed.wait()
             self._servo_changed.clear()
@@ -311,7 +303,8 @@ class RQServos(object):
             self,
             channel: Union[int, str],
             degrees_per_sec: int = 0) -> None:
-        """
+        """Set the speed of a servo.
+
         Cause the servo to move away from its current position at the
         rate degrees_per_sec until stopped or a limit is reached. A
         thread is used to continue the motion until it's stopped.
@@ -321,7 +314,6 @@ class RQServos(object):
         Using MOVE_PERIOD_S as the time period, calculate how many
         degrees to move to achieve degrees_per_sec.
         """
-
         servo = self._get_servo(channel)
         servo_state = self._servos_state_list[servo['channel']]
 
@@ -357,12 +349,12 @@ class RQServos(object):
             self,
             channel: Union[int, str],
             increment_deg: int = 0) -> int:
-        """
+        """Increment the position of a servo.
+
         Retrieve the current servo angle, change it by the
         signed value in increment_deg, and set that new
         angle.
         """
-
         servo = self._get_servo(channel)
         servo_state = self._servos_state_list[servo['channel']]
         incr_angle = (servo_state['angle'] + increment_deg)
@@ -385,11 +377,11 @@ class RQServos(object):
     def set_servo_angle(self,
                         channel: Union[int, str],
                         angle: int = None) -> None:
-        """
+        """Set the position of a servo.
+
         For servo channel set its angle. If no angle is provided, set
         the default angle. The default is the previously set angle.
         """
-
         servo = self._get_servo(channel)
         servo_state = self._servos_state_list[servo['channel']]
         if angle is None:
@@ -413,13 +405,13 @@ class RQServos(object):
         self._servo_changed.set()
 
     def _pca9685_init(self):
-        """
+        """Initialize servo controller.
+
         Configure the PCA9685 for use, usually each time power is applied.
 
         Set the initial angle of each defined servo according to the
         configuration parameters.
         """
-
         with self._servo_lock:
             for register, value in SETUPS:
                 self._bus.write_byte_data(I2C_DEVICE_ID, register, value)
@@ -454,37 +446,34 @@ class RQServos(object):
                 self.disable_servo(channel)
 
     def controller_powered(self) -> bool:
-        """
-        Returns True when the servo controller is powered.
-        """
-
+        """Return True when the servo controller is powered."""
         return self._controller_powered
 
     def disable_servo(self, channel: int) -> None:
-        """
+        """Disable a servo.
+
         Flat-line the PWM signal to the servo and prevent a new angle
         from being set by set_servo_angle(). The effect of this method
         is undone by restore_servo_angle().
         """
-
         with self._servo_state_lock:
             self._servos_state_list[channel]['enabled'] = False
         self._set_servo_pwm(channel, 0, 0)
 
     def restore_servo_angle(self, channel: int) -> None:
-        """
+        """Restore the previous position.
+
         Set the servo to its most recent angle, to recover from the
         PWM signal having been flat-lined by disable_servo().
         """
-
         self.set_servo_angle(channel)
         self._servos_state_list[channel]['enabled'] = True
 
     def set_power(self, enable: bool = False) -> None:
-        """
+        """Set or reset the power.
+
         Enable or disable power to the servo controller.
         """
-
         if (enable and not self._controller_powered):
             GPIO.output(SERVO_ENABLE_PIN, GPIO.HIGH)
             sleep(INIT_DELAY_S)
@@ -496,8 +485,5 @@ class RQServos(object):
             GPIO.output(SERVO_ENABLE_PIN, GPIO.LOW)
 
     def _constrain(self, min_value: int, value: int, max_value: int) -> int:
-        """
-        Clip value to be between min and max, inclusive.
-        """
-
+        """Clip value to be between min and max, inclusive."""
         return max(min(value, max_value), min_value)
