@@ -207,7 +207,7 @@ class RQManage(RQNode):
                         which_servo,
                         servo.angle_incr_deg)
                 elif servo.command_type == COMMAND_SPEED:
-                    self.get_logger().info(
+                    self.get_logger().debug(
                         '_servo_cb:'
                         f' servo: {which_servo}'
                         f' speed: {servo.speed_dps}'
@@ -419,8 +419,6 @@ class RQManage(RQNode):
             return
 
         if not input_pins:
-            self.get_logger().info('_publish_gpio: No inputs to publish',
-                                   throttle_duration_sec=5.0)
             return
 
         gpio_msg = GPIOInput()
