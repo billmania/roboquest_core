@@ -106,7 +106,7 @@ class RQManage(RQNode):
             self.get_logger().warning,
             self._hat.pad_line,
             self._hat.pad_text)
-        self._motors = RQMotors()
+        self._motors = RQMotors(self.get_logger)
         self._gpio = UserGPIO()
 
         #
@@ -118,7 +118,7 @@ class RQManage(RQNode):
         self._servo_config.init_config(SERVO_CONFIG, servo_config)
         self._servos = RQServos(
             self._servo_config.get_config(SERVO_CONFIG),
-            self.get_logger,
+            self.get_logger
         )
 
         self._exit_timer = Timer(EXIT_DELAY_S, self._exit_worker)
@@ -207,7 +207,7 @@ class RQManage(RQNode):
                         which_servo,
                         servo.angle_incr_deg)
                 elif servo.command_type == COMMAND_SPEED:
-                    self.get_logger().info(
+                    self.get_logger().debug(
                         '_servo_cb:'
                         f' servo: {which_servo}'
                         f' speed: {servo.speed_dps}'
@@ -419,8 +419,6 @@ class RQManage(RQNode):
             return
 
         if not input_pins:
-            self.get_logger().info('_publish_gpio: No inputs to publish',
-                                   throttle_duration_sec=5.0)
             return
 
         gpio_msg = GPIOInput()

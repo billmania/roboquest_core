@@ -5,7 +5,8 @@ from time import sleep
 
 import RPi.GPIO as GPIO
 
-import smbus2
+from roboquest_core.rq_i2c import BusError, DeviceError
+from roboquest_core.rq_i2c import RQI2CComms
 
 MAX_MOTOR_RPM = 300
 MOTOR_ENABLE_PIN = 17
@@ -26,8 +27,9 @@ class RQMotors(object):
     bus.
     """
 
-    def __init__(self):
+    def __init__(self, ros_logger):
         """Configure the motor control sub-system for use."""
+        self._ros_logger = ros_logger
         self._write_errors = 0
         self.set_motor_max_rpm(MAX_MOTOR_RPM)
 
@@ -50,8 +52,18 @@ class RQMotors(object):
         self._motors_enabled = False
 
     def _setup_i2c(self) -> None:
-        """Initialize the I2C bus."""
-        self._bus = smbus2.SMBus(I2C_BUS_ID)
+        """Initialize use of the I2C bus."""
+        try:
+            self._i2c = RQI2CComms()
+            self._i2c.add_device(I2C_BUS_ID, I2C_DEVICE_ID)
+
+        except BusError as e:
+            self._ros_logger().warn(f'_setup_i2c: BusError({e})')
+            raise e
+
+        except DeviceError as e:
+            self._ros_logger().warn(f'_setup_i2c: DeviceError({e})')
+            raise e
 
     def motors_are_enabled(self) -> bool:
         """Return True when the motors are enabled."""
@@ -101,12 +113,14 @@ class RQMotors(object):
             tries -= 1
 
             try:
-                self._bus.write_i2c_block_data(
+                self._i2c.write_block_payload(
+                    I2C_BUS_ID,
                     I2C_DEVICE_ID,
                     I2C_MOTOR_RIGHT_REGISTER,
                     list(self._pack_rpm(self._constrain_rpm(right)))
                 )
-                self._bus.write_i2c_block_data(
+                self._i2c.write_block_payload(
+                    I2C_BUS_ID,
                     I2C_DEVICE_ID,
                     I2C_MOTOR_LEFT_REGISTER,
                     list(self._pack_rpm(self._constrain_rpm(left)))
@@ -114,8 +128,9 @@ class RQMotors(object):
 
                 return True
 
-            except Exception:
+            except Exception as e:
                 # TODO: What are the possible Exceptions?
+                self._ros_logger().warn(f'set_motors_rpm: Exception({e})')
                 self._write_errors += 1
                 sleep(WRITE_ERROR_WAIT_S)
 
