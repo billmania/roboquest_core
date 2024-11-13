@@ -5,10 +5,10 @@ from typing import List, Union
 
 import RPi.GPIO as GPIO
 
+from roboquest_core.rq_i2c import BusError, DeviceError
+from roboquest_core.rq_i2c import RQI2CComms
 from roboquest_core.rq_servos_config import SERVO_QTY, Servo
 from roboquest_core.rq_servos_config import servo_map_and_state
-
-import smbus2
 
 SERVO_ENABLE_PIN = 23
 I2C_BUS_ID = 1
@@ -129,8 +129,21 @@ class RQServos(object):
         GPIO.output(SERVO_ENABLE_PIN, GPIO.LOW)
 
     def _setup_i2c(self) -> None:
-        """Initialize for I2C communication."""
-        self._bus = smbus2.SMBus(I2C_BUS_ID)
+        """Initialize use of the I2C bus."""
+        try:
+            self._i2c = RQI2CComms()
+            self._i2c.add_device(I2C_BUS_ID, I2C_DEVICE_ID)
+            self._ros_logger().warn(
+                f'_setup_i2c: devices {self._i2c._buses}'
+            )
+
+        except BusError as e:
+            self._ros_logger.warn(f'_setup_i2c: BusError({e})')
+            raise e
+
+        except DeviceError as e:
+            self._ros_logger().warn(f'_setup_i2c: DeviceError({e})')
+            raise e
 
     def _translate(self,
                    input_value: int,
@@ -166,18 +179,32 @@ class RQServos(object):
         based on a desired angle.
         """
         with self._servo_lock:
-            self._bus.write_byte_data(I2C_DEVICE_ID,
-                                      PULSE0_ON_L_REG+4*channel,
-                                      on_count & 0xFF)
-            self._bus.write_byte_data(I2C_DEVICE_ID,
-                                      PULSE0_ON_H_REG+4*channel,
-                                      on_count >> 8)
-            self._bus.write_byte_data(I2C_DEVICE_ID,
-                                      PULSE0_OFF_L_REG+4*channel,
-                                      off_count & 0xFF)
-            self._bus.write_byte_data(I2C_DEVICE_ID,
-                                      PULSE0_OFF_H_REG+4*channel,
-                                      off_count >> 8)
+            try:
+                self._i2c.write_byte_payload(
+                    I2C_BUS_ID,
+                    I2C_DEVICE_ID,
+                    PULSE0_ON_L_REG+4*channel,
+                    on_count & 0xFF)
+                self._i2c.write_byte_payload(
+                    I2C_BUS_ID,
+                    I2C_DEVICE_ID,
+                    PULSE0_ON_H_REG+4*channel,
+                    on_count >> 8)
+                self._i2c.write_byte_payload(
+                    I2C_BUS_ID,
+                    I2C_DEVICE_ID,
+                    PULSE0_OFF_L_REG+4*channel,
+                    off_count & 0xFF)
+                self._i2c.write_byte_payload(
+                    I2C_BUS_ID,
+                    I2C_DEVICE_ID,
+                    PULSE0_OFF_H_REG+4*channel,
+                    off_count >> 8)
+
+            except Exception as e:
+                self._ros_logger().warn(
+                    f'set_servo_pwm: {e}'
+                )
 
     def _get_servo(
             self,
@@ -414,7 +441,11 @@ class RQServos(object):
         """
         with self._servo_lock:
             for register, value in SETUPS:
-                self._bus.write_byte_data(I2C_DEVICE_ID, register, value)
+                self._i2c.write_byte_payload(
+                    I2C_BUS_ID,
+                    I2C_DEVICE_ID,
+                    register,
+                    value)
                 sleep(INIT_DELAY_S)
 
         for channel, servo in enumerate(self._servos_list):
