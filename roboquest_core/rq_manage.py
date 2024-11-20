@@ -13,6 +13,7 @@ import diagnostic_msgs
 from geometry_msgs.msg import TwistStamped
 
 import rclpy.logging
+from rclpy import ok as ROSok
 from rclpy import shutdown as ROSshutdown
 from rclpy import spin_once as ROSspin_once
 from rclpy.parameter import Parameter
@@ -22,6 +23,8 @@ from roboquest_core.rq_gpio_user import PinError, USER_GPIO_PIN, UserGPIO
 from roboquest_core.rq_hat import HAT_BUTTON, HAT_SCREEN
 from roboquest_core.rq_hat import RQHAT
 from roboquest_core.rq_hat import SCREEN_HEADER, TELEM_HEADER
+from roboquest_core.rq_i2c import RQI2CComms
+from roboquest_core.rq_i2c_modules import I2CSupport
 from roboquest_core.rq_motors import MAX_MOTOR_RPM, RQMotors
 from roboquest_core.rq_network import RQNetwork
 from roboquest_core.rq_node import RQNode
@@ -39,6 +42,12 @@ from rq_msgs.srv import Control
 from std_srvs.srv import Empty
 
 VERSION = '24rc1'
+
+MODULE_DIR = (
+    '/usr/src/ros2ws'
+    '/install/roboquest_core/share/roboquest_core/persist'
+    '/i2c'
+)
 
 JOYSTICK_MAX = 100
 #
@@ -108,6 +117,20 @@ class RQManage(RQNode):
             self._hat.pad_text)
         self._motors = RQMotors(self.get_logger)
         self._gpio = UserGPIO()
+        self._i2c = RQI2CComms()
+        self._i2c_support = I2CSupport()
+        self._i2c_objects = self._i2c_support.import_modules(MODULE_DIR)
+        if self._i2c_objects:
+            for i2c_object in self._i2c_objects:
+                try:
+                    self._i2c_objects[i2c_object].setup()
+                    self.get_logger().info(
+                        f'I2C {i2c_object} setup() executed'
+                    )
+                except Exception as e:
+                    self.get_logger().warn(
+                        f'I2C {i2c_object} setup() excepted: {e}'
+                    )
 
         #
         # servo_config() provides a default servo configuration. It's
@@ -523,7 +546,7 @@ class RQManage(RQNode):
 
         self._hat.control_comms(enable=True)
         self._hat.charger_control(on=True)
-        while True:
+        while ROSok():
             ROSspin_once(node=self, timeout_sec=0)
             sentence = self._hat.read_sentence()
             ROSspin_once(node=self, timeout_sec=0)
@@ -532,7 +555,23 @@ class RQManage(RQNode):
                 self._process_sentence(sentence)
 
             self._publish_gpio()
+            if self._i2c_objects:
+                for i2c_object in self._i2c_objects:
+                    try:
+                        self._i2c_objects[i2c_object].run_once()
+                    except Exception as e:
+                        self.get_logger().warn(
+                            f'I2C {i2c_object} run_once() excepted: {e}'
+                        )
 
+        if self._i2c_objects:
+            for i2c_object in self._i2c_objects:
+                try:
+                    self._i2c_objects[i2c_object].cleanup()
+                except Exception as e:
+                    self.get_logger().warn(
+                        f'I2C {i2c_object} cleanup() excepted: {e}'
+                    )
         self.get_logger().info(f'{self._node_name} stopping')
         self.destroy_node()
         ROSshutdown()
