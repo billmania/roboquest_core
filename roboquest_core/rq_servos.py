@@ -11,6 +11,9 @@ from roboquest_core.rq_servos_config import SERVO_QTY, Servo
 from roboquest_core.rq_servos_config import servo_map_and_state
 
 SERVO_ENABLE_PIN = 23
+#
+# This constant is only a default and can be overridden by i2c.yaml.
+#
 I2C_BUS_ID = 1
 I2C_DEVICE_ID = 0x40
 
@@ -69,7 +72,11 @@ class TranslateError(Exception):
 class RQServos(object):
     """Manage the PCA9685 controller bus."""
 
-    def __init__(self, servos_list: List[dict], ros_logger=None):
+    def __init__(
+         self,
+         servos_list: List[dict],
+         i2c_bus_id: int = I2C_BUS_ID,
+         ros_logger=None):
         """Initialize for servos.
 
         Setup communication with the servo sub-system. The PCA9685 I2C
@@ -79,6 +86,7 @@ class RQServos(object):
         self._write_errors = 0
 
         self._servos_list = servos_list
+        self._i2c_bus_id = i2c_bus_id
         self._ros_logger = ros_logger
         #
         # self._servos_list is a list of Servo objects, indexed by their
@@ -132,7 +140,7 @@ class RQServos(object):
         """Initialize use of the I2C bus."""
         try:
             self._i2c = RQI2CComms()
-            self._i2c.add_device(I2C_BUS_ID, I2C_DEVICE_ID)
+            self._i2c.add_device(self._i2c_bus_id, I2C_DEVICE_ID)
             self._ros_logger().warn(
                 f'_setup_i2c: devices {self._i2c._buses}'
             )
@@ -181,22 +189,22 @@ class RQServos(object):
         with self._servo_lock:
             try:
                 self._i2c.write_byte_payload(
-                    I2C_BUS_ID,
+                    self._i2c_bus_id,
                     I2C_DEVICE_ID,
                     PULSE0_ON_L_REG+4*channel,
                     on_count & 0xFF)
                 self._i2c.write_byte_payload(
-                    I2C_BUS_ID,
+                    self._i2c_bus_id,
                     I2C_DEVICE_ID,
                     PULSE0_ON_H_REG+4*channel,
                     on_count >> 8)
                 self._i2c.write_byte_payload(
-                    I2C_BUS_ID,
+                    self._i2c_bus_id,
                     I2C_DEVICE_ID,
                     PULSE0_OFF_L_REG+4*channel,
                     off_count & 0xFF)
                 self._i2c.write_byte_payload(
-                    I2C_BUS_ID,
+                    self._i2c_bus_id,
                     I2C_DEVICE_ID,
                     PULSE0_OFF_H_REG+4*channel,
                     off_count >> 8)
@@ -442,7 +450,7 @@ class RQServos(object):
         with self._servo_lock:
             for register, value in SETUPS:
                 self._i2c.write_byte_payload(
-                    I2C_BUS_ID,
+                    self._i2c_bus_id,
                     I2C_DEVICE_ID,
                     register,
                     value)

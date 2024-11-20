@@ -10,6 +10,9 @@ from roboquest_core.rq_i2c import RQI2CComms
 
 MAX_MOTOR_RPM = 300
 MOTOR_ENABLE_PIN = 17
+#
+# This constant is only a default and can be overridden by i2c.yaml.
+#
 I2C_BUS_ID = 6
 I2C_DEVICE_ID = 0x53
 
@@ -27,8 +30,9 @@ class RQMotors(object):
     bus.
     """
 
-    def __init__(self, ros_logger):
+    def __init__(self, i2c_bus_id: int = I2C_BUS_ID, ros_logger=None):
         """Configure the motor control sub-system for use."""
+        self._i2c_bus_id = i2c_bus_id
         self._ros_logger = ros_logger
         self._write_errors = 0
         self.set_motor_max_rpm(MAX_MOTOR_RPM)
@@ -55,7 +59,7 @@ class RQMotors(object):
         """Initialize use of the I2C bus."""
         try:
             self._i2c = RQI2CComms()
-            self._i2c.add_device(I2C_BUS_ID, I2C_DEVICE_ID)
+            self._i2c.add_device(self._i2c_bus_id, I2C_DEVICE_ID)
 
         except BusError as e:
             self._ros_logger().warn(f'_setup_i2c: BusError({e})')
@@ -114,13 +118,13 @@ class RQMotors(object):
 
             try:
                 self._i2c.write_block_payload(
-                    I2C_BUS_ID,
+                    self._i2c_bus_id,
                     I2C_DEVICE_ID,
                     I2C_MOTOR_RIGHT_REGISTER,
                     list(self._pack_rpm(self._constrain_rpm(right)))
                 )
                 self._i2c.write_block_payload(
-                    I2C_BUS_ID,
+                    self._i2c_bus_id,
                     I2C_DEVICE_ID,
                     I2C_MOTOR_LEFT_REGISTER,
                     list(self._pack_rpm(self._constrain_rpm(left)))

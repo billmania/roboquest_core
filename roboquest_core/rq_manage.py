@@ -115,7 +115,10 @@ class RQManage(RQNode):
             self.get_logger().warning,
             self._hat.pad_line,
             self._hat.pad_text)
-        self._motors = RQMotors(self.get_logger)
+        self._motors = RQMotors(
+            self._parameters['motors_i2c_bus_id'],
+            self.get_logger
+        )
         self._gpio = UserGPIO()
         self._i2c = RQI2CComms()
         self._i2c_support = I2CSupport()
@@ -141,6 +144,7 @@ class RQManage(RQNode):
         self._servo_config.init_config(SERVO_CONFIG, servo_config)
         self._servos = RQServos(
             self._servo_config.get_config(SERVO_CONFIG),
+            self._parameters['servos_i2c_bus_id'],
             self.get_logger
         )
 
@@ -410,7 +414,9 @@ class RQManage(RQNode):
             ('hat_data_bits', Parameter.Type.INTEGER),
             ('hat_parity', Parameter.Type.STRING),
             ('hat_stop_bits', Parameter.Type.INTEGER),
-            ('hat_comms_read_hz', Parameter.Type.INTEGER)
+            ('hat_comms_read_hz', Parameter.Type.INTEGER),
+            ('servos_i2c_bus_id', Parameter.Type.INTEGER),
+            ('motors_i2c_bus_id', Parameter.Type.INTEGER)
         ]
         self.declare_parameters(
             namespace='',

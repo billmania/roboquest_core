@@ -1,0 +1,4 @@
+/**:
+  ros__parameters:
+    servos_i2c_bus_id: 1
+    motors_i2c_bus_id: 6
