@@ -7,11 +7,39 @@ from launch_ros.actions import Node
 
 from pathlib import Path
 
+I2C_YAML_FILE = 'i2c.yaml'
+I2C_PARAM_FILE = (
+    '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist' +
+    '/i2c' +
+    '/' +
+    I2C_YAML_FILE
+)
+USER_LAUNCH_FILE = (
+    '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist' +
+    '/nodes' +
+    '/user_nodes.launch.py'
+)
+
+
 def generate_launch_description():
+    if Path(I2C_PARAM_FILE).exists():
+        src = Path(I2C_PARAM_FILE)
+        dest = (
+            Path(get_package_share_directory('roboquest_core')) /
+                'config' /
+            I2C_YAML_FILE
+        )
+        dest.write_text(src.read_text())
+
     base_params = os.path.join(
         get_package_share_directory('roboquest_core'),
         'config',
         'roboquest_base.yaml'
+    )
+    i2c_params = os.path.join(
+        get_package_share_directory('roboquest_core'),
+        'config',
+        'i2c.yaml'
     )
     camera0_params = os.path.join(
         get_package_share_directory('roboquest_core'),
@@ -38,7 +66,7 @@ def generate_launch_description():
         name='rq_base_node',
         package="roboquest_core",
         executable="roboquest_base_node.py",
-        parameters=[base_params],
+        parameters=[base_params, i2c_params],
         respawn=True,
         respawn_delay=5
     )
@@ -71,12 +99,6 @@ def generate_launch_description():
         executable="camera_node",
         parameters=[camera3_params],
         respawn=False
-    )
-
-    USER_LAUNCH_FILE = (
-        '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist' +
-        '/nodes' +
-        '/user_nodes.launch.py'
     )
 
     if Path(USER_LAUNCH_FILE).exists():
