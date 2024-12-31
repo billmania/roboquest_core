@@ -255,7 +255,7 @@ class RQNetwork(object):
             try:
                 output += self._pad_line(f"Dev: {connection['DEVICE']}")
                 ip_address = resub(
-                    '/\d*$',
+                    r'/\d*$',
                     '',
                     connection['IP4.ADDRESS[1]'])  # noqa: W605
                 output += self._pad_line(f"IP: {ip_address}")
