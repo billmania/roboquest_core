@@ -8,7 +8,7 @@ IMAGE=$1
 NAME=rq_core
 PERSIST_DIR="/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist"
 
-printf "Starting %s on %s\n" "$IMAGE" $DOCKER_HOST
+printf "Starting %s on %s\n" "$IMAGE" "$(docker context show)"
 
 docker run -d --rm \
         --privileged \
