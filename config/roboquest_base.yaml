@@ -7,3 +7,9 @@
     hat_parity: 'N'
     hat_stop_bits: 1
     hat_comms_read_hz: 5
+    min_rpm: 5
+    max_rpm: 150
+    rpm_to_tps: 1.25
+    track_circumference: 0.680
+    track_separation: 0.225
+    sprocket_radius: 0.027

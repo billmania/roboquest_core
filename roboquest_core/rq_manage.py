@@ -19,13 +19,14 @@ from rclpy import spin_once as ROSspin_once
 from rclpy.parameter import Parameter
 
 from roboquest_core.rq_config_file import ConfigFile
+from roboquest_core.rq_drive_utilities import DriveUtils
 from roboquest_core.rq_gpio_user import PinError, USER_GPIO_PIN, UserGPIO
 from roboquest_core.rq_hat import HAT_BUTTON, HAT_SCREEN
 from roboquest_core.rq_hat import RQHAT
 from roboquest_core.rq_hat import SCREEN_HEADER, TELEM_HEADER
 from roboquest_core.rq_i2c import RQI2CComms
 from roboquest_core.rq_i2c_modules import I2CSupport
-from roboquest_core.rq_motors import MAX_MOTOR_RPM, RQMotors
+from roboquest_core.rq_motors import RQMotors
 from roboquest_core.rq_network import RQNetwork
 from roboquest_core.rq_node import RQNode
 from roboquest_core.rq_servos import RQServos
@@ -49,17 +50,6 @@ MODULE_DIR = (
     '/i2c'
 )
 
-JOYSTICK_MAX = 100
-#
-# These two SCALE values scale the input command values, which usually
-# come from a joystick, to the actual range of motor RPM. The input
-# commands are assumed to be in the range [-JOYSTICK_MAX, JOYSTICK_MAX].
-# This scaling happens before the motor RPM is constrained by a max
-# motor RPM setting.
-#
-# TODO: Replace with parameters which transform input values to m/s and rad/s.
-LINEAR_SCALE = MAX_MOTOR_RPM / JOYSTICK_MAX
-ANGULAR_SCALE = LINEAR_SCALE / 2
 
 #
 # How many seconds to wait before calling exit().
@@ -81,7 +71,8 @@ class RQManage(RQNode):
 
     The node which manages the RoboQuest application. It contains
     all of the logic specific to management and use of the
-    RoboQuest HAT.
+    RoboQuest HAT, network interfaces, motors, servos, and I2C
+    communications.
 
     It requires rclpy.init() has already been called.
     """
@@ -117,7 +108,15 @@ class RQManage(RQNode):
             self._hat.pad_text)
         self._motors = RQMotors(
             self._parameters['motors_i2c_bus_id'],
+            self._parameters['min_rpm'],
+            self._parameters['max_rpm'],
+            self._parameters['rpm_to_tps'],
             self.get_logger
+        )
+        self._drive_utils = DriveUtils(
+            self._parameters['sprocket_radius'],
+            self._parameters['track_circumference'],
+            self._parameters['track_separation']
         )
         self._gpio = UserGPIO()
         self._i2c = RQI2CComms()
@@ -256,13 +255,15 @@ class RQManage(RQNode):
 
     def _motor_speed_cb(self, msg: MotorSpeed):
         """Set the maximum motor speed."""
-        if not (0 <= msg.max_rpm <= MAX_MOTOR_RPM):
+        if not (0 <= msg.max_rpm <= self._parameters['max_rpm']):
             self.get_logger().error(
                 'motor_speed_cb'
-                f' max: {msg.max_rpm} must be in [0, {MAX_MOTOR_RPM}]')
+                f' max: {msg.max_rpm}'
+                f" must be in [0, {self._parameters['max_rpm']}]"
+            )
             return
 
-        self._motors.set_motor_max_rpm(msg.max_rpm)
+        self._motors.set_user_max_rpm(msg.max_rpm)
         self.get_logger().debug('motor_speed_cb'
                                 f' max: {msg.max_rpm}')
 
@@ -287,21 +288,19 @@ class RQManage(RQNode):
         #
         # The units for linear.x are meters per second and for angular.z
         # are radians per second.
-        # The robot has a left and right motor commanded with units of
-        # percentage of maximim rotational velocity.
+        # The robot has a left and right motor, so this method uses
+        # linear.x and angular.z to calculate a net velocity for each
+        # of the two drive motors.
         #
-        linear_velocity = msg.twist.linear.x * LINEAR_SCALE
-        right_velocity = left_velocity = linear_velocity
+        right_velocity = left_velocity = (
+            self._drive_utils.linear_to_rpm(msg.twist.linear.x)
+        )
+        angular_velocity = self._drive_utils.angular_to_rpm(
+            msg.twist.angular.z
+        )
+        left_velocity -= angular_velocity
+        right_velocity += angular_velocity
 
-        angular_velocity = abs(msg.twist.angular.z) * ANGULAR_SCALE
-        if msg.twist.angular.z > 0:
-            # left turn
-            right_velocity += angular_velocity
-            left_velocity -= angular_velocity
-        else:
-            # left turn
-            right_velocity -= angular_velocity
-            left_velocity += angular_velocity
         self.get_logger().debug('motor_cb'
                                 f' right_velocity: {right_velocity}'
                                 f', left_velocity: {left_velocity}')
@@ -416,7 +415,13 @@ class RQManage(RQNode):
             ('hat_stop_bits', Parameter.Type.INTEGER),
             ('hat_comms_read_hz', Parameter.Type.INTEGER),
             ('servos_i2c_bus_id', Parameter.Type.INTEGER),
-            ('motors_i2c_bus_id', Parameter.Type.INTEGER)
+            ('motors_i2c_bus_id', Parameter.Type.INTEGER),
+            ('min_rpm', Parameter.Type.INTEGER),
+            ('max_rpm', Parameter.Type.INTEGER),
+            ('rpm_to_tps', Parameter.Type.DOUBLE),
+            ('track_circumference', Parameter.Type.DOUBLE),
+            ('track_separation', Parameter.Type.DOUBLE),
+            ('sprocket_radius', Parameter.Type.DOUBLE)
         ]
         self.declare_parameters(
             namespace='',
