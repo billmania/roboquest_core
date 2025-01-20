@@ -302,6 +302,7 @@ class RQManage(RQNode):
         right_velocity += angular_velocity
 
         self.get_logger().debug('motor_cb'
+                                f'       linear.x: {msg.twist.linear.x}'
                                 f' right_velocity: {right_velocity}'
                                 f', left_velocity: {left_velocity}')
 

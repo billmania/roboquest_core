@@ -25,12 +25,21 @@ class DriveUtils(object):
         ts is the distance between the centers of the two tracks,
            in meters
         """
-        self._SR = sr
-        self._TL = tl
-        self._TS = ts
+        scm = 2 * π * sr
+        AR = ts / 2
 
-        self._scm = 2 * π * self._SR
-        self._AR = self._TS / 2
+        self._linear_conversion = (
+            SECS_PER_MIN /
+            tl /
+            scm
+        )
+
+        self._angular_conversion = (
+            SECS_PER_MIN *
+            AR /
+            tl /
+            scm
+        )
 
     def angular_to_rpm(
         self,
@@ -46,11 +55,7 @@ class DriveUtils(object):
         negative of that value to the right sprocket.
         """
         return round(
-            angular_velocity *
-            SECS_PER_MIN *
-            self._AR /
-            self._TL /
-            self._scm
+            angular_velocity * self._angular_conversion
         )
 
     def linear_to_rpm(
@@ -63,8 +68,5 @@ class DriveUtils(object):
         return value is RPMs for both sprockets.
         """
         return round(
-            linear_velocity *
-            SECS_PER_MIN /
-            self._TL /
-            self._scm
+            linear_velocity * self._linear_conversion
         )
