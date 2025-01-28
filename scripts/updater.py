@@ -195,7 +195,7 @@ class RQUpdate(object):
             log_server.serve_forever()
 
         if Path(LOG_SERVER_PID_FILE).exists():
-            logging.warning('Stopping previous log server')
+            logging.warning('Trying to stop previous log server')
             with open(LOG_SERVER_PID_FILE, 'r') as f:
                 log_server_pid = f.read()
 
@@ -203,9 +203,10 @@ class RQUpdate(object):
                 kill(int(log_server_pid), SIGKILL)
             except Exception:
                 logging.warning(
-                    f'Failed to stop previous log server {int(log_server_pid)}'
+                    f'Failed to stop previous log server {log_server_pid}'
                 )
             Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
+            self._reboot_cb('_start_log_server')
 
         log_server = Process(
             target=log_server_task,
@@ -377,11 +378,12 @@ class RQUpdate(object):
             logging.info(
                 f'updater.py upgraded to {self._latest_updater_version}'
             )
-            logging.warning('updater.py exiting')
+            logging.warning('updater.py exiting without reboot')
             self.stop_containers()
             self._status_msg('updater.py exiting')
             self._set_update_in_progress()
 
+            Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
             exit(0)
         else:
             logging.warning('Failed to retrieve updater.py,'
@@ -850,6 +852,7 @@ class RQUpdate(object):
         logging.warn('Shutdown triggered')
         self.stop_containers()
         self._status_msg('Shutdown triggered')
+        Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
         os.system('systemctl halt')
 
         #
@@ -862,9 +865,10 @@ class RQUpdate(object):
 
     def _reboot_cb(self, arg):
         """Reboot the robot."""
-        logging.info('Reboot triggered')
+        logging.info(f'Reboot triggered by {arg}')
         self.stop_containers()
         self._status_msg('Reboot triggered')
+        Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
         os.system('systemctl reboot')
 
         #
