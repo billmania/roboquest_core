@@ -642,14 +642,11 @@ class RQUpdate(object):
         """
         Restore config_file with its old version.
 
-        In the special case where neither the config file nor its
-        old version exists, the condition will be logged but nothing
-        else will be done. This case occurs once with a
-        never-before-used RoboQuest SD image OR after a catastrophic
-        failure. In either event, a restart of the robot will cause
-        the rq_ui container to install a default config file.
+        If the old version doesn't exist, the config_file will
+        be removed. This scenario could occur when the config_file
+        is empty or corrupt.
         """
-        logging.warn(f'Attempting to restore {config_file}')
+        logging.warning(f'Attempting to restore {config_file}')
         config_file_path = Path(OS_PERSIST_DIR) / config_file
         old_config_file_path = Path(OS_PERSIST_DIR) / (config_file + '.old')
 
@@ -660,9 +657,11 @@ class RQUpdate(object):
                 logging.info(f'{config_file} restored from old version')
 
             except Exception as e:
-                logging.warn(f'Failed to restore {config_file}: {e}')
+                logging.warning(f'Failed to restore {config_file}: {e}')
         else:
-            logging.warn(f'Old version of {config_file} does not exist')
+            logging.warning(f'Old version of {config_file} does not exist')
+            logging.warning(f'Removing {config_file}')
+            config_file_path.unlink(missing_ok=True)
 
         return
 
@@ -795,8 +794,15 @@ class RQUpdate(object):
 
             if config_file_path.exists():
                 if config_file_path.stat().st_size > 0:
-                    configuration = json.loads(config_file_path.read_text())
-                    if 'version' in configuration:
+                    try:
+                        configuration = json.loads(
+                            config_file_path.read_text()
+                        )
+
+                    except json.decoder.JSONDecodeError:
+                        configuration = None
+
+                    if configuration and 'version' in configuration:
                         continue
                     else:
                         logging.warning(f'{config_file}'
@@ -833,8 +839,8 @@ class RQUpdate(object):
         logging.info('starting RoboQuest')
         self._status_msg('starting RoboQuest')
         while True:
-            self._check_running_containers()
             self._check_configs(restore=False)
+            self._check_running_containers()
 
             message = self.read_message()
             if message:
@@ -849,7 +855,7 @@ class RQUpdate(object):
         Called when the shutdown control signal has been detected and
         when the SHUTDOWN command is received.
         """
-        logging.warn('Shutdown triggered')
+        logging.warning('Shutdown triggered')
         self.stop_containers()
         self._status_msg('Shutdown triggered')
         Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
@@ -861,7 +867,7 @@ class RQUpdate(object):
         # to stop the docker daemon.
         #
         sleep(LONG_TIME)
-        logging.warn('Woke unexpectedly from sleep')
+        logging.warning('Woke unexpectedly from sleep')
 
     def _reboot_cb(self, arg):
         """Reboot the robot."""
@@ -877,7 +883,7 @@ class RQUpdate(object):
         # to stop the docker daemon.
         #
         sleep(LONG_TIME)
-        logging.warn('Woke unexpectedly from sleep')
+        logging.warning('Woke unexpectedly from sleep')
 
     def _remove_old_images(self):
         """
@@ -910,4 +916,5 @@ if __name__ == '__main__':
         rq_update.close_fifo()
 
     rq_update.stop_containers()
+    Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
     logging.warning('Shutdown')
