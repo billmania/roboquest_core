@@ -33,7 +33,7 @@ from requests import get
 
 from rq_hat import RQHAT
 
-VERSION = 15
+VERSION = 16
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -44,6 +44,8 @@ RQ_UI_PERSIST = (
     '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
 )
 OS_PERSIST_DIR = '/opt/persist'
+DOCKER_VOLUMES_DIR = '/opt/docker/volumes'
+ROS_LOGS = 'ros_logs'
 UPDATER_DIR = '/opt/updater'
 DIRECTORIES = [OS_PERSIST_DIR, UPDATER_DIR]
 CONFIG_FILES = ['configuration.json']
@@ -84,7 +86,7 @@ CONTAINERS = {
                     '/var/run/dbus:/var/run/dbus',
                     '/run/udev:/run/udev:ro',
                     OS_PERSIST_DIR+':'+RQ_CORE_PERSIST,
-                    'ros_logs:/root/.ros/log']},
+                    ROS_LOGS+':/root/.ros/log']},
     'rq_ui': {
         'image_name': 'registry.q4excellence.com:5678/rq_ui',
         'privileged': False,
@@ -92,7 +94,7 @@ CONTAINERS = {
         'volumes': ['/dev/shm:/dev/shm',
                     UPDATE_FIFO+':'+UPDATE_FIFO,
                     OS_PERSIST_DIR+':'+RQ_UI_PERSIST,
-                    'ros_logs:/root/.ros/log']}
+                    ROS_LOGS+':/root/.ros/log']}
 }
 
 
@@ -741,6 +743,35 @@ class RQUpdate(object):
 
         return
 
+    def _check_ros_logs(self) -> None:
+        """
+        Check the ROS_LOGS directory exists.
+
+        If the ROS_LOGS directory exists, return. Otherwise, attempt to
+        create it and set both its mode and ownership.
+        """
+        ros_logs_dir = Path(DOCKER_VOLUMES_DIR) / ROS_LOGS / '_data'
+        if ros_logs_dir.exists():
+            return
+
+        logging.warning(f'{ros_logs_dir} does not exist')
+
+        try:
+            #
+            # If any of the parents don't exist, there are likely bigger
+            # filesystem problems.
+            #
+            ros_logs_dir.mkdir(
+                mode=0o755,
+                parents=True,
+                exist_ok=True
+            )
+
+            logging.info(f'{ros_logs_dir} created')
+
+        except Exception as e:
+            logging.warning(f'Failed to create ros_logs: {e}')
+
     def _check_configs(self, restore: bool = False) -> None:
         """
         Check the configurations.
@@ -790,6 +821,7 @@ class RQUpdate(object):
         self._update_other_files()
         self._start_log_server()
         self._publish_versions()
+        self._check_ros_logs()
         self._check_configs(restore=True)
 
         if self._update_in_progress():
