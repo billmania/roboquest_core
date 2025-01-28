@@ -33,7 +33,7 @@ from requests import get
 
 from rq_hat import RQHAT
 
-VERSION = 15
+VERSION = 16
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -44,6 +44,8 @@ RQ_UI_PERSIST = (
     '/usr/src/ros2ws/install/roboquest_ui/share/roboquest_ui/public/persist'
 )
 OS_PERSIST_DIR = '/opt/persist'
+DOCKER_VOLUMES_DIR = '/opt/docker/volumes'
+ROS_LOGS = 'ros_logs'
 UPDATER_DIR = '/opt/updater'
 DIRECTORIES = [OS_PERSIST_DIR, UPDATER_DIR]
 CONFIG_FILES = ['configuration.json']
@@ -84,7 +86,7 @@ CONTAINERS = {
                     '/var/run/dbus:/var/run/dbus',
                     '/run/udev:/run/udev:ro',
                     OS_PERSIST_DIR+':'+RQ_CORE_PERSIST,
-                    'ros_logs:/root/.ros/log']},
+                    ROS_LOGS+':/root/.ros/log']},
     'rq_ui': {
         'image_name': 'registry.q4excellence.com:5678/rq_ui',
         'privileged': False,
@@ -92,7 +94,7 @@ CONTAINERS = {
         'volumes': ['/dev/shm:/dev/shm',
                     UPDATE_FIFO+':'+UPDATE_FIFO,
                     OS_PERSIST_DIR+':'+RQ_UI_PERSIST,
-                    'ros_logs:/root/.ros/log']}
+                    ROS_LOGS+':/root/.ros/log']}
 }
 
 
@@ -193,7 +195,7 @@ class RQUpdate(object):
             log_server.serve_forever()
 
         if Path(LOG_SERVER_PID_FILE).exists():
-            logging.warning('Stopping previous log server')
+            logging.warning('Trying to stop previous log server')
             with open(LOG_SERVER_PID_FILE, 'r') as f:
                 log_server_pid = f.read()
 
@@ -201,9 +203,10 @@ class RQUpdate(object):
                 kill(int(log_server_pid), SIGKILL)
             except Exception:
                 logging.warning(
-                    f'Failed to stop previous log server {int(log_server_pid)}'
+                    f'Failed to stop previous log server {log_server_pid}'
                 )
             Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
+            self._reboot_cb('_start_log_server')
 
         log_server = Process(
             target=log_server_task,
@@ -375,11 +378,12 @@ class RQUpdate(object):
             logging.info(
                 f'updater.py upgraded to {self._latest_updater_version}'
             )
-            logging.warning('updater.py exiting')
+            logging.warning('updater.py exiting without reboot')
             self.stop_containers()
             self._status_msg('updater.py exiting')
             self._set_update_in_progress()
 
+            Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
             exit(0)
         else:
             logging.warning('Failed to retrieve updater.py,'
@@ -638,14 +642,11 @@ class RQUpdate(object):
         """
         Restore config_file with its old version.
 
-        In the special case where neither the config file nor its
-        old version exists, the condition will be logged but nothing
-        else will be done. This case occurs once with a
-        never-before-used RoboQuest SD image OR after a catastrophic
-        failure. In either event, a restart of the robot will cause
-        the rq_ui container to install a default config file.
+        If the old version doesn't exist, the config_file will
+        be removed. This scenario could occur when the config_file
+        is empty or corrupt.
         """
-        logging.warn(f'Attempting to restore {config_file}')
+        logging.warning(f'Attempting to restore {config_file}')
         config_file_path = Path(OS_PERSIST_DIR) / config_file
         old_config_file_path = Path(OS_PERSIST_DIR) / (config_file + '.old')
 
@@ -656,9 +657,11 @@ class RQUpdate(object):
                 logging.info(f'{config_file} restored from old version')
 
             except Exception as e:
-                logging.warn(f'Failed to restore {config_file}: {e}')
+                logging.warning(f'Failed to restore {config_file}: {e}')
         else:
-            logging.warn(f'Old version of {config_file} does not exist')
+            logging.warning(f'Old version of {config_file} does not exist')
+            logging.warning(f'Removing {config_file}')
+            config_file_path.unlink(missing_ok=True)
 
         return
 
@@ -741,6 +744,35 @@ class RQUpdate(object):
 
         return
 
+    def _check_ros_logs(self) -> None:
+        """
+        Check the ROS_LOGS directory exists.
+
+        If the ROS_LOGS directory exists, return. Otherwise, attempt to
+        create it and set both its mode and ownership.
+        """
+        ros_logs_dir = Path(DOCKER_VOLUMES_DIR) / ROS_LOGS / '_data'
+        if ros_logs_dir.exists():
+            return
+
+        logging.warning(f'{ros_logs_dir} does not exist')
+
+        try:
+            #
+            # If any of the parents don't exist, there are likely bigger
+            # filesystem problems.
+            #
+            ros_logs_dir.mkdir(
+                mode=0o755,
+                parents=True,
+                exist_ok=True
+            )
+
+            logging.info(f'{ros_logs_dir} created')
+
+        except Exception as e:
+            logging.warning(f'Failed to create ros_logs: {e}')
+
     def _check_configs(self, restore: bool = False) -> None:
         """
         Check the configurations.
@@ -762,8 +794,15 @@ class RQUpdate(object):
 
             if config_file_path.exists():
                 if config_file_path.stat().st_size > 0:
-                    configuration = json.loads(config_file_path.read_text())
-                    if 'version' in configuration:
+                    try:
+                        configuration = json.loads(
+                            config_file_path.read_text()
+                        )
+
+                    except json.decoder.JSONDecodeError:
+                        configuration = None
+
+                    if configuration and 'version' in configuration:
                         continue
                     else:
                         logging.warning(f'{config_file}'
@@ -790,6 +829,7 @@ class RQUpdate(object):
         self._update_other_files()
         self._start_log_server()
         self._publish_versions()
+        self._check_ros_logs()
         self._check_configs(restore=True)
 
         if self._update_in_progress():
@@ -799,8 +839,8 @@ class RQUpdate(object):
         logging.info('starting RoboQuest')
         self._status_msg('starting RoboQuest')
         while True:
-            self._check_running_containers()
             self._check_configs(restore=False)
+            self._check_running_containers()
 
             message = self.read_message()
             if message:
@@ -815,9 +855,10 @@ class RQUpdate(object):
         Called when the shutdown control signal has been detected and
         when the SHUTDOWN command is received.
         """
-        logging.warn('Shutdown triggered')
+        logging.warning('Shutdown triggered')
         self.stop_containers()
         self._status_msg('Shutdown triggered')
+        Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
         os.system('systemctl halt')
 
         #
@@ -826,13 +867,14 @@ class RQUpdate(object):
         # to stop the docker daemon.
         #
         sleep(LONG_TIME)
-        logging.warn('Woke unexpectedly from sleep')
+        logging.warning('Woke unexpectedly from sleep')
 
     def _reboot_cb(self, arg):
         """Reboot the robot."""
-        logging.info('Reboot triggered')
+        logging.info(f'Reboot triggered by {arg}')
         self.stop_containers()
         self._status_msg('Reboot triggered')
+        Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
         os.system('systemctl reboot')
 
         #
@@ -841,7 +883,7 @@ class RQUpdate(object):
         # to stop the docker daemon.
         #
         sleep(LONG_TIME)
-        logging.warn('Woke unexpectedly from sleep')
+        logging.warning('Woke unexpectedly from sleep')
 
     def _remove_old_images(self):
         """
@@ -874,4 +916,5 @@ if __name__ == '__main__':
         rq_update.close_fifo()
 
     rq_update.stop_containers()
+    Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
     logging.warning('Shutdown')
