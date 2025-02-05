@@ -7,12 +7,11 @@ functionality.
 from os import getpid, kill
 from signal import SIGKILL
 from threading import Timer
-from time import sleep
+from time import time
 
 import rclpy.logging
-from rclpy import ok as ROSok
 from rclpy import shutdown as ROSshutdown
-from rclpy import spin_once as ROSspin_once
+from rclpy import spin as ROSspin
 from rclpy.parameter import Parameter
 
 from roboquest_core.rq_config_file import ConfigFile
@@ -52,6 +51,15 @@ COMMAND_IGNORE = 0
 COMMAND_ANGLE = 1
 COMMAND_INCR = 2
 COMMAND_SPEED = 3
+LOOP_PERIOD = 0.5
+SPEED_SET_PERIOD = 2.0
+SERVO_ID = 8
+MIN_SERVO = 10
+CENTER_SERVO = 90
+MAX_SERVO = 170
+SERVO_INCREMENT = 2
+SERVO_SPEED = 3
+SERVO_MODE = COMMAND_INCR
 
 
 class RQServoTest(RQNode):
@@ -303,6 +311,61 @@ class RQServoTest(RQNode):
                                   throttle_duration_sec=60)
         self._sentence_errors += 1
 
+    def _loop_callback(self):
+        """Run the loop logic."""
+        if SERVO_MODE == COMMAND_ANGLE:
+            self._angle += self._increment
+            self._servos.set_servo_angle(
+                SERVO_ID,
+                self._angle)
+
+            if self._angle > MAX_SERVO:
+                self.get_logger().info(
+                    f'MAX angle: {self._angle}'
+                    f', increment: {self._increment}'
+                )
+                self._increment = -(self._increment)
+                self._angle = MAX_SERVO
+            elif self._angle < MIN_SERVO:
+                self.get_logger().info(
+                    f'MIN angle: {self._angle}'
+                    f', increment: {self._increment}'
+                )
+                self._increment = -(self._increment)
+                self._angle = MIN_SERVO
+
+        elif SERVO_MODE == COMMAND_INCR:
+            self.get_logger().info(
+                f"INCR: {self._servo_state['angle']}"
+                f', increment: {self._increment}'
+            )
+            if self._servo_state['angle'] > MAX_SERVO:
+                self._increment = -(self._increment)
+            elif self._servo_state['angle'] < MIN_SERVO:
+                self._increment = -(self._increment)
+            self._servos.incr_servo_angle(
+                SERVO_ID,
+                self._increment)
+
+        elif SERVO_MODE == COMMAND_SPEED:
+            current_time = time()
+            if (current_time - self._speed_last_set) < SPEED_SET_PERIOD:
+                return
+            else:
+                self._speed_last_set = current_time
+
+            self.get_logger().info(
+                f"SPEED: {self._servo_state['angle']}"
+                f', increment: {self._speed}'
+            )
+            if self._servo_state['angle'] > MAX_SERVO:
+                self._speed = -(self._speed)
+            elif self._servo_state['angle'] < MIN_SERVO:
+                self._speed = -(self._speed)
+            self._servos.set_servo_speed(
+                SERVO_ID,
+                self._speed)
+
     def main(self):
         """Configure the serial port.
 
@@ -318,38 +381,21 @@ class RQServoTest(RQNode):
         self._servos.set_power(False)
         self._servos.set_power(True)
 
-        SERVO_ID = 8
-        LOOP_PERIOD = 0.2
-        MIN_SERVO = 70
-        MAX_SERVO = 100
-        angle = MIN_SERVO
-        servo_increment = 2
+        self._servo_state = self._servos._servos_state_list[SERVO_ID]
+        self._angle = CENTER_SERVO
+        self._servos.set_servo_angle(
+            SERVO_ID,
+            self._angle)
+        self.get_logger().info(f'Commanded {self._angle}'
+                               f", Reported{self._servo_state['angle']}")
+        self._speed = SERVO_SPEED
+        self._increment = SERVO_INCREMENT
+
+        self._speed_last_set = time()
+        self.create_timer(LOOP_PERIOD, self._loop_callback)
+
         try:
-            while ROSok():
-                ROSspin_once(node=self, timeout_sec=0)
-
-                angle += servo_increment
-                self._servos.set_servo_angle(
-                    SERVO_ID,
-                    angle)
-
-    #            self._servos.incr_servo_angle(
-    #            self._servos.set_servo_speed(
-
-                if angle > MAX_SERVO:
-                    self.get_logger().info(
-                        f'MAX angle: {angle}, increment: {servo_increment}'
-                    )
-                    servo_increment = -(servo_increment)
-                    angle = MAX_SERVO
-                elif angle < MIN_SERVO:
-                    self.get_logger().info(
-                        f'MIN angle: {angle}, increment: {servo_increment}'
-                    )
-                    servo_increment = -(servo_increment)
-                    angle = MIN_SERVO
-
-                sleep(LOOP_PERIOD)
+            ROSspin(node=self)
 
         except KeyboardInterrupt:
             self._servos.set_power(False)
