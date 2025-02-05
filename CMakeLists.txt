@@ -28,6 +28,7 @@ install(DIRECTORY config
 ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
         scripts/roboquest_base_node.py
+        scripts/servo_tester_node.py
         DESTINATION lib/${PROJECT_NAME}
 )
 
