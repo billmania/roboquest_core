@@ -115,7 +115,6 @@ class RQManage(RQNode):
         )
         self._drive_utils = DriveUtils(
             self._parameters['sprocket_radius'],
-            self._parameters['track_circumference'],
             self._parameters['track_separation']
         )
         self._gpio = UserGPIO()
@@ -402,7 +401,6 @@ class RQManage(RQNode):
             ('min_rpm', Parameter.Type.INTEGER),
             ('max_rpm', Parameter.Type.INTEGER),
             ('rpm_to_tps', Parameter.Type.DOUBLE),
-            ('track_circumference', Parameter.Type.DOUBLE),
             ('track_separation', Parameter.Type.DOUBLE),
             ('sprocket_radius', Parameter.Type.DOUBLE)
         ]

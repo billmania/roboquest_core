@@ -14,30 +14,30 @@ class DriveUtils(object):
 
     def __init__(
         self,
-        sr: float,
-        tl: float,
-        ts: float
+        sprocket_radius: float,
+        track_separation: float
     ):
         """Initialize the constants.
 
-        sr is the radius of the drive sprocket in meters
-        tl is the length of the drive track in meters
-        ts is the distance between the centers of the two tracks,
+        sprocket_radius is the radius of the drive sprocket in meters,
+                        including the thickness of the track
+        track_separation is the distance between the centers of the two tracks,
            in meters
         """
-        scm = 2 * π * sr
-        AR = ts / 2
+
+        # scm is the sprocket circumference
+        scm = 2 * π * sprocket_radius
+        # AR is the angular motion radius
+        AR = track_separation / 2
 
         self._linear_conversion = (
             SECS_PER_MIN /
-            tl /
             scm
         )
 
         self._angular_conversion = (
             SECS_PER_MIN *
             AR /
-            tl /
             scm
         )
 

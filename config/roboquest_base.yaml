@@ -10,6 +10,5 @@
     min_rpm: 5
     max_rpm: 150
     rpm_to_tps: 1.25
-    track_circumference: 0.680
     track_separation: 0.225
-    sprocket_radius: 0.027
+    sprocket_radius: 0.0283
