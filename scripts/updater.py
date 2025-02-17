@@ -33,7 +33,7 @@ from requests import get
 
 from rq_hat import RQHAT
 
-VERSION = 16
+VERSION = 17
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -65,6 +65,7 @@ UPDATE_URL = URL_BASE + UPDATE_SCRIPT
 CERT_FILE = 'cert.pem'
 KEY_FILE = 'key.pem'
 LOOP_PERIOD_S = 10.0
+GET_TIMEOUT_S = 9.0
 LONG_TIME = 60
 EOL = '\n'
 
@@ -118,7 +119,7 @@ class RQUpdate(object):
         self._containers_running = False
 
         self._status_messages = []
-        self._status_msg(f'updater.py version {VERSION}')
+        self._status_msg(f'updater.py {VERSION}')
 
         self._ros_domain_id = self._get_ros_domain_id()
         logging.info(f'{self._ros_domain_id}')
@@ -127,8 +128,15 @@ class RQUpdate(object):
         self._client = None
         self._fifo = None
 
-        self._latest_updater_version = None
         self._latest_image_versions = None
+        # TODO: Retrieve installed firmware version from HAT
+        self._all_versions = {
+            'installed': {
+                'updater': VERSION,
+                'firmware': 'Unknown'
+            },
+            'latest': {}
+        }
 
         self._fifo_path = fifo_path
 
@@ -313,7 +321,10 @@ class RQUpdate(object):
         for other_file in [CERT_FILE, KEY_FILE]:
             other_file_path = UPDATER_DIR + '/' + other_file
             if not Path(other_file_path).exists():
-                file_content = get(URL_BASE + other_file, timeout=10.0)
+                file_content = get(
+                    URL_BASE + other_file,
+                    timeout=GET_TIMEOUT_S
+                )
                 if file_content.status_code == 200:
                     Path(other_file_path).touch(mode=0o440)
                     with open(other_file_path, 'w') as f:
@@ -327,27 +338,36 @@ class RQUpdate(object):
             self._status_msg('Other files install failed')
             self._status_msg('Check Internet connection')
 
-    def _requirements_met(self) -> bool:
+    def _Internet_connected(self) -> bool:
         """
         Confirm requirements are met.
 
-        Confirm network connectivity is available and appears stable.
+        Confirm Internet connectivity is available and appears stable.
         """
-        result = True
-
-        response = get(UPDATE_VERSION, timeout=10.0)
+        logging.info('Checking Internet connectivity')
+        response = get(
+            UPDATE_VERSION,
+            params=self._query_string(),
+            timeout=GET_TIMEOUT_S
+        )
         if response.status_code == 200:
-            self._latest_updater_version = int(response.text)
+            self._all_versions['latest']['updater'] = int(response.text)
         else:
-            logging.warning('Network connectivity requirements not met')
-            result = False
-        response = get(FIRMWARE_VERSION, timeout=10.0)
-        if response.status_code == 200:
-            self._latest_firmware_version = response.text[:-1]
-        else:
-            self._latest_firmware_version = 'Unknown'
+            logging.warning('No Internet connectivity')
+            return False
 
-        return result
+        response = get(
+            FIRMWARE_VERSION,
+            params=self._query_string(),
+            timeout=GET_TIMEOUT_S
+        )
+        if response.status_code == 200:
+            self._all_versions['latest']['firmware'] = response.text[:-1]
+        else:
+            logging.warning(f'Failed to get {FIRMWARE_VERSION}')
+            return False
+
+        return True
 
     def _update_updater(self):
         """
@@ -357,12 +377,13 @@ class RQUpdate(object):
         and install it. This provides both an upgrade and a rollback
         mechanism.
         """
-        if VERSION == self._latest_updater_version:
+        if VERSION == self._all_versions['latest']['updater']:
             return
 
         self.close_fifo()
         logging.info(
-            f'Replacing updater {VERSION} with {self._latest_updater_version}'
+            f'Replacing updater {VERSION} with'
+            f" {self._all_versions['latest']['updater']}"
         )
         try:
             Path(UPDATE_SCRIPT).replace(UPDATE_SCRIPT+'.old')
@@ -370,13 +391,18 @@ class RQUpdate(object):
         except Exception:
             pass
 
-        response = get(UPDATE_URL, timeout=10.0)
+        response = get(
+            UPDATE_URL,
+            params=self._query_string(),
+            timeout=GET_TIMEOUT_S
+        )
         if response.status_code == 200:
             with open(UPDATE_SCRIPT, 'w') as f:
                 f.write(response.text)
             Path(UPDATE_SCRIPT).chmod(0o554)
             logging.info(
-                f'updater.py upgraded to {self._latest_updater_version}'
+                'updater.py upgraded to'
+                f" {self._all_versions['latest']['updater']}"
             )
             logging.warning('updater.py exiting without reboot')
             self.stop_containers()
@@ -496,7 +522,7 @@ class RQUpdate(object):
         Update the images if a newer version exists or
         there is no local copy.
         """
-        if self._requirements_met():
+        if self._Internet_connected():
             self.close_fifo()
             self._update_updater()
             self._reset_update_in_progress()
@@ -549,10 +575,13 @@ class RQUpdate(object):
         """
         try:
             with open(SERIAL_NUMBER_FILE, 'r') as serial_file:
-                cpuserial = serial_file.read()
+                self._cpuserial = serial_file.read()[:-1]
 
-            logging.info(f'CPU serial {cpuserial[:-1]}')
-            return f'ROS_DOMAIN_ID={(int(cpuserial[:-1], base=16) % 100) + 1}'
+            logging.info(f'CPU serial {self._cpuserial[:-1]}')
+            self._unique_id = (
+                int(self._cpuserial, base=16)
+                % 100) + 1
+            return f'ROS_DOMAIN_ID={self._unique_id}'
 
         except Exception:
             logging.error('Failed to get CPU serial')
@@ -689,30 +718,20 @@ class RQUpdate(object):
         Collect the versions of the installed images and other components.
         Create and write ALL_VERSIONS.
         """
-        all_versions = {
-            'installed': {
-                'updater': VERSION
-            },
-            'latest': {
-                'firmware': self._latest_firmware_version,
-                'updater': self._latest_updater_version
-            }
-        }
-
         installed_image_versions = self._get_installed_image_versions()
         for image in installed_image_versions:
-            all_versions['installed'][image[0]] = image[1]
-        # TODO: Retrieve current firmware version from HAT
-        all_versions['installed']['firmware'] = 'Unknown'
-        all_versions['installed']['updater'] = VERSION
-        for image in self._latest_image_versions:
-            image_details = self._latest_image_versions[image]
-            all_versions['latest'][image_details['name']] = (
-                image_details['version']
-            )
+            self._all_versions['installed'][image[0]] = image[1]
+        try:
+            for image in self._latest_image_versions:
+                image_details = self._latest_image_versions[image]
+                self._all_versions['latest'][image_details['name']] = (
+                    image_details['version']
+                )
+        except TypeError:
+            pass
 
         with open(ALL_VERSIONS, 'w') as f:
-            f.write(json.dumps(all_versions))
+            f.write(json.dumps(self._all_versions))
         return
 
     def _publish_versions(self):
@@ -720,27 +739,26 @@ class RQUpdate(object):
         Publish the software versions.
 
         Called once when this script starts, before any containers are
-        started. It's  expected this method will usually fail, because the
-        robot usually does NOT have Internet connectivity.
-        It extracts the "version" label from the local Docker images, the
-        files UPDATE_VERSION and IMAGE_VERSIONS from the registry, and
-        the VERSION constant from this script. All of that information is used
-        to create ALL_VERSIONS.
-        When images are updated, it's expected that this script will be
-        restarted after the updates complete.
+        started. It's  expected this method will usually fail to publish
+        a full dictionary of versions, because the robot usually does NOT
+        have Internet connectivity.
         """
-        if self._requirements_met():
+        self._write_version_object()
+
+        if self._Internet_connected():
             #
-            # Network connectivity exists and the latest version
-            # string for updater.py is in self._updater_version.
+            # Retrieve the version numbers for the newest images.
             #
-            response = get(IMAGE_VERSIONS, timeout=10.0)
+            response = get(
+                IMAGE_VERSIONS,
+                params=self._query_string(),
+                timeout=GET_TIMEOUT_S
+            )
             if response.status_code == 200:
                 self._latest_image_versions = json.loads(response.text)
+                self._write_version_object()
             else:
                 logging.warning(f'Failed to retrieve {IMAGE_VERSIONS}')
-
-        self._write_version_object()
 
         return
 
@@ -818,6 +836,48 @@ class RQUpdate(object):
                 self._restore_config(config_file)
 
         return
+
+    def _get_uptime(self) -> str:
+        """Get the system uptime."""
+        with open('/proc/uptime', 'r') as f:
+            uptime = f.readline().split()[0]
+
+        return uptime
+
+    def _query_string(self) -> dict:
+        """
+        Create the query string parameters for requests.
+
+        The string contains information about the current
+        environment.
+
+        serial is the Raspberry Pi serial number
+        id is the value assigned to ROS_DOMAIN_ID
+        uptime is the elapsed seconds since the OS started
+        up is the version of the updater script
+        core is the installed version of the rq_core image
+        ui is the installed version of the rq_ui image
+        """
+        try:
+            rq_core_version = self._all_versions['installed']['rq_core']
+
+        except KeyError:
+            rq_core_version = None
+
+        try:
+            rq_ui_version = self._all_versions['installed']['rq_ui']
+
+        except KeyError:
+            rq_ui_version = None
+
+        return {
+            'serial': self._cpuserial,
+            'id': self._unique_id,
+            'uptime': self._get_uptime(),
+            'updater': VERSION,
+            'core': rq_core_version,
+            'ui': rq_ui_version
+        }
 
     def run(self) -> None:
         """
