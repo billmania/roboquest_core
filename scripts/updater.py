@@ -22,6 +22,7 @@ import json
 import logging
 import os
 from pathlib import Path, PurePath
+from socket import AF_INET, SOCK_DGRAM, socket
 from sys import exit
 from time import sleep
 
@@ -33,7 +34,7 @@ from requests import get
 
 from rq_hat import RQHAT
 
-VERSION = 17
+VERSION = 18
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -144,6 +145,26 @@ class RQUpdate(object):
         self._setup_docker()
         self._remove_old_images()
         self._setup_fifo()
+
+    def _get_local_ip(self) -> str:
+        """Get the IP address.
+
+        Return the IP address of an UP interface which has a default
+        route.
+        """
+        s = socket(AF_INET, SOCK_DGRAM)
+        s.settimeout(0)
+        try:
+            s.connect(('10.254.254.254', 1))
+            IP = s.getsockname()[0]
+
+        except Exception:
+            IP = '127.0.0.1'
+
+        finally:
+            s.close()
+
+        return IP
 
     def _start_log_server(self):
         """
@@ -335,7 +356,6 @@ class RQUpdate(object):
                     success = False
 
         if not success:
-            self._status_msg('Other files install failed')
             self._status_msg('Check Internet connection')
 
     def _Internet_connected(self) -> bool:
@@ -437,6 +457,12 @@ class RQUpdate(object):
             'N',
             1,
             1.0)
+        #
+        # This code is deliberately stomping on a variable, _status_lines,
+        # private to the RQHAT class. There is currently no other mechanism
+        # provided to persist what was already written to the status
+        # screen of the HAT.
+        #
         _hat._status_lines = self._status_messages
         _hat.status_msg(msg)
         self._status_messages = _hat._status_lines
@@ -458,6 +484,7 @@ class RQUpdate(object):
 
         self._containers_running = False
         logging.info('Containers stopped')
+        self._status_msg('Containers stopped')
         self._client.containers.prune()
 
     def _get_latest_images(self):
@@ -522,6 +549,8 @@ class RQUpdate(object):
         Update the images if a newer version exists or
         there is no local copy.
         """
+        self._status_msg('Updating images')
+
         if self._Internet_connected():
             self.close_fifo()
             self._update_updater()
@@ -530,7 +559,7 @@ class RQUpdate(object):
             self._setup_fifo()
 
             logging.info('update process complete')
-            self._status_msg('update process complete')
+            self._status_msg('images updated')
 
     def _process_message(self, message: str) -> None:
         """
@@ -595,6 +624,7 @@ class RQUpdate(object):
         container isn't available locally begin the update process.
         """
         images_exist = True
+
         for container_name in to_start:
             image_name = CONTAINERS[container_name]['image_name']
             image = self._client.images.list(
@@ -604,9 +634,14 @@ class RQUpdate(object):
                 logging.warning(f'The image {image_name}'
                                 f' for container {container_name}'
                                 ' does not exist locally')
+                self._status_msg(f'Missing {container_name}')
                 images_exist = False
 
         if images_exist:
+            self._status_msg('Starting containers')
+            #
+            # They're not running yet, but will soon be.
+            #
             self._containers_running = True
 
             for container_name in to_start:
@@ -704,10 +739,19 @@ class RQUpdate(object):
         """
         installed_images = []
         for container_name in CONTAINERS:
-            image = self._client.images.get(
-                CONTAINERS[container_name]['image_name']
-            )
-            installed_images.append((container_name, image.labels['version']))
+            try:
+                image = self._client.images.get(
+                    CONTAINERS[container_name]['image_name']
+                )
+                installed_images.append(
+                    (container_name, image.labels['version'])
+                )
+
+            except docker.errors.ImageNotFound:
+                logging.warning(f'Image {container_name} not present locally')
+                installed_images.append(
+                    (container_name, 'NA')
+                )
 
         return installed_images
 
@@ -889,6 +933,13 @@ class RQUpdate(object):
         self._update_other_files()
         self._start_log_server()
         self._publish_versions()
+        self._status_msg(
+            f"c:{self._all_versions['installed']['rq_core']}"
+            f" u:{self._all_versions['installed']['rq_ui']}"
+        )
+        self._status_msg(
+            f'IP:{self._get_local_ip()}'
+        )
         self._check_ros_logs()
         self._check_configs(restore=True)
 
