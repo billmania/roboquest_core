@@ -22,6 +22,7 @@ import json
 import logging
 import os
 from pathlib import Path, PurePath
+from signal import SIGHUP, SIGINT, SIGTERM, SIG_IGN, signal
 from socket import AF_INET, SOCK_DGRAM, socket
 from sys import exit
 from time import sleep
@@ -34,7 +35,7 @@ from requests import get
 
 from rq_hat import RQHAT
 
-VERSION = 18
+VERSION = '18rc1'
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -56,7 +57,7 @@ LOG_SERVER_PORT = 8444
 LOG_LINES = 100
 UPDATE_IN_PROGRESS = UPDATER_DIR + '/update_in_progress'
 UPDATE_FIFO = '/tmp/update_fifo'
-UPDATE_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
+UPDATER_VERSION = 'http://registry.q4excellence.com:8079/updater_version.txt'
 FIRMWARE_VERSION = 'http://registry.q4excellence.com:8079/firmware_version.txt'
 IMAGE_VERSIONS = 'http://registry.q4excellence.com:8079/image_versions.json'
 ALL_VERSIONS = OS_PERSIST_DIR + '/versions.json'
@@ -113,6 +114,10 @@ class RQUpdate(object):
             level=logging.INFO)
         logging.info(f'updater.py version {VERSION} started')
 
+        signal(SIGHUP, self.shutdown)
+        signal(SIGINT, self.shutdown)
+        signal(SIGTERM, self.shutdown)
+
         #
         # A safety flag, to ensure the HAT serial port isn't touched
         # when any containers are running.
@@ -127,7 +132,6 @@ class RQUpdate(object):
 
         self._messages = []
         self._client = None
-        self._fifo = None
 
         self._latest_image_versions = None
         # TODO: Retrieve installed firmware version from HAT
@@ -139,11 +143,12 @@ class RQUpdate(object):
             'latest': {}
         }
 
-        self._fifo_path = fifo_path
-
         self._setup_shutdown()
         self._setup_docker()
         self._remove_old_images()
+
+        self._fifo = None
+        self._fifo_path = fifo_path
         self._setup_fifo()
 
     def _get_local_ip(self) -> str:
@@ -296,8 +301,7 @@ class RQUpdate(object):
         setup_fifo.
 
         Ensure the FIFO rendezvous point exists and configure it for
-        non-blocking reads. The non-existence of the FIFO can be interpreted
-        by the UI as an update in progress.
+        non-blocking reads.
         """
         try:
             os.mkfifo(self._fifo_path)
@@ -309,12 +313,16 @@ class RQUpdate(object):
 
         self._fifo = os.fdopen(fifo_fd)
 
-    def close_fifo(self) -> None:
+    def _close_fifo(self) -> None:
         """Close and remove the FIFO."""
-        if self._fifo:
-            self._fifo.close()
-        Path(self._fifo_path).unlink(missing_ok=True)
+        try:
+            if self._fifo:
+                self._fifo.close()
 
+        except Exception:
+            pass
+
+        Path(self._fifo_path).unlink(missing_ok=True)
         self._fifo = None
 
     def read_message(self) -> str:
@@ -365,13 +373,14 @@ class RQUpdate(object):
         Confirm Internet connectivity is available and appears stable.
         """
         logging.info('Checking Internet connectivity')
+        self._status_msg('Checking Internet')
         response = get(
-            UPDATE_VERSION,
+            UPDATER_VERSION,
             params=self._query_string(),
             timeout=GET_TIMEOUT_S
         )
         if response.status_code == 200:
-            self._all_versions['latest']['updater'] = int(response.text)
+            self._all_versions['latest']['updater'] = response.text[:-1]
         else:
             logging.warning('No Internet connectivity')
             return False
@@ -400,7 +409,7 @@ class RQUpdate(object):
         if VERSION == self._all_versions['latest']['updater']:
             return
 
-        self.close_fifo()
+        self._close_fifo()
         logging.info(
             f'Replacing updater {VERSION} with'
             f" {self._all_versions['latest']['updater']}"
@@ -413,7 +422,6 @@ class RQUpdate(object):
 
         response = get(
             UPDATE_URL,
-            params=self._query_string(),
             timeout=GET_TIMEOUT_S
         )
         if response.status_code == 200:
@@ -435,9 +443,9 @@ class RQUpdate(object):
             logging.warning('Failed to retrieve updater.py,'
                             f' status code {response.status_code}')
 
-    def _status_msg(self, msg: str) -> None:
+    def _status_msg(self, msg: str = None) -> None:
         """
-        Show a status message.
+        Add a status message to screen 4.
 
         Use the HAT screen 4 status message capability to display
         msg. The HAT is opened and closed every time this method is
@@ -445,9 +453,15 @@ class RQUpdate(object):
         Incidentally, the HAT does not persist status messages, so
         this method persists them and overrides an internal RQHAT
         variable.
+
+        In order to refresh the display of status messages, without
+        adding another status line, set the msg argument to None.
+        Setting msg to the empty string will add a blank line to
+        the status display.
         """
         if self._containers_running:
-            logging.warning('_status_msg: containers running')
+            if msg:
+                logging.warning(f'HAT UI not available for: {msg}')
             return
 
         _hat = RQHAT(
@@ -458,14 +472,18 @@ class RQUpdate(object):
             1,
             1.0)
         #
-        # This code is deliberately stomping on a variable, _status_lines,
-        # private to the RQHAT class. There is currently no other mechanism
-        # provided to persist what was already written to the status
-        # screen of the HAT.
+        # This method deliberately stomps on a private class variable,
+        # _hat._status_lines. Since the private variable is initialized
+        # to the empty list by the constructor, the stomping provides a
+        # means to persist previous updater.py status lines and to
+        # refresh the display without adding another line.
         #
         _hat._status_lines = self._status_messages
-        _hat.status_msg(msg)
-        self._status_messages = _hat._status_lines
+        if msg is not None:
+            _hat.status_msg(msg)
+            self._status_messages = _hat._status_lines
+        else:
+            _hat.show_status_msgs()
         _hat.close()
 
     def stop_containers(self):
@@ -552,7 +570,7 @@ class RQUpdate(object):
         self._status_msg('Updating images')
 
         if self._Internet_connected():
-            self.close_fifo()
+            self._close_fifo()
             self._update_updater()
             self._reset_update_in_progress()
             self._get_latest_images()
@@ -795,7 +813,6 @@ class RQUpdate(object):
             #
             response = get(
                 IMAGE_VERSIONS,
-                params=self._query_string(),
                 timeout=GET_TIMEOUT_S
             )
             if response.status_code == 200:
@@ -941,10 +958,13 @@ class RQUpdate(object):
             f'IP:{self._get_local_ip()}'
         )
         self._check_ros_logs()
+        self._status_msg()
         self._check_configs(restore=True)
+        self._status_msg()
 
         if self._update_in_progress():
             logging.info('resuming update in progress')
+            self._status_msg()
             self._update_images()
 
         logging.info('starting RoboQuest')
@@ -959,26 +979,28 @@ class RQUpdate(object):
             else:
                 sleep(LOOP_PERIOD_S)
 
-    def _shutdown_cb(self, arg):
+    def _shutdown_cb(self, arg='UNKNOWN'):
         """
         Shutdown the robot.
 
         Called when the shutdown control signal has been detected and
         when the SHUTDOWN command is received.
         """
-        logging.warning('Shutdown triggered')
-        self.stop_containers()
-        self._status_msg('Shutdown triggered')
-        Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
+        if arg == 'SHUTDOWN':
+            logging.warning('Shutdown triggered by UI')
+        elif type(arg) is int:
+            logging.warning('Shutdown button pressed')
+        else:
+            logging.warning(f'Shutdown by {arg}')
+
         os.system('systemctl halt')
 
         #
-        # Pause here for a bit, so updater.py doesn't try
-        # to restart the containers after the OS is trying
-        # to stop the docker daemon.
+        # Pause here, so updater.py doesn't try
+        # to restart the containers while systemd is
+        # stopping the docker daemon.
         #
         sleep(LONG_TIME)
-        logging.warning('Woke unexpectedly from sleep')
 
     def _reboot_cb(self, arg):
         """Reboot the robot."""
@@ -1016,16 +1038,36 @@ class RQUpdate(object):
             except Exception as e:
                 logging.warning(f'Failed to remove old {image.id}: {e}')
 
+    def shutdown(
+        self,
+        signal_number=None,
+        stack_frame=None
+    ):
+        """Ready the updater to be shutdown.
+
+        This method must complete quickly, because it could have been
+        called when a signal was received from systemd.
+        """
+        signal(SIGHUP, SIG_IGN)
+        signal(SIGINT, SIG_IGN)
+        signal(SIGTERM, SIG_IGN)
+
+        if signal_number:
+            logging.info(f'Shutdown signal: {signal_number}')
+        else:
+            logging.info('Shutdown by user')
+        logging.shutdown()
+        self._close_fifo()
+        Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
+        self.stop_containers()
+        self._status_msg('Shutdown')
+
+        exit(0)
+
 
 if __name__ == '__main__':
 
     rq_update = RQUpdate(UPDATE_FIFO)
-    try:
-        rq_update.run()
 
-    except KeyboardInterrupt:
-        rq_update.close_fifo()
-
-    rq_update.stop_containers()
-    Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
-    logging.warning('Shutdown')
+    rq_update.run()
+    rq_update.shutdown()
