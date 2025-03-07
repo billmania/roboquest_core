@@ -66,7 +66,7 @@ URL_BASE = 'http://registry.q4excellence.com:8079/'
 UPDATE_URL = URL_BASE + UPDATE_SCRIPT
 CERT_FILE = 'cert.pem'
 KEY_FILE = 'key.pem'
-LOOP_PERIOD_S = 10.0
+LOOP_PERIOD_S = 3.0
 GET_TIMEOUT_S = 9.0
 LONG_TIME = 60
 EOL = '\n'
@@ -123,6 +123,7 @@ class RQUpdate(object):
         # when any containers are running.
         #
         self._containers_running = False
+        self._setup_HAT()
 
         self._status_messages = []
         self._status_msg(f'updater.py {VERSION}')
@@ -143,7 +144,6 @@ class RQUpdate(object):
             'latest': {}
         }
 
-        self._setup_shutdown()
         self._setup_docker()
         self._remove_old_images()
 
@@ -288,8 +288,7 @@ class RQUpdate(object):
         GPIO.setup(SHUTDOWN_PIN, GPIO.IN)
         GPIO.add_event_detect(
             SHUTDOWN_PIN,
-            GPIO.BOTH,
-            callback=self._shutdown_cb
+            GPIO.RISING
         )
 
     def _setup_docker(self):
@@ -443,6 +442,30 @@ class RQUpdate(object):
             logging.warning('Failed to retrieve updater.py,'
                             f' status code {response.status_code}')
 
+    def _setup_HAT(self):
+        """Prepare the HAT.
+
+        The HAT is used to display status messages. The connection
+        to the HAT must be destroyed before the containers are started,
+        to prevent conflict with the containers.
+        """
+        self._hat = RQHAT(
+            HAT_SERIAL,
+            38400,
+            7,
+            'N',
+            1,
+            1.0)
+        self._hat.control_comms(enable=False)
+
+    def _close_hat(self):
+        """Close the HAT connection.
+
+        Completely reset and shutdown the serial port and the GPIO
+        sub-system.
+        """
+        self._hat.close()
+
     def _status_msg(self, msg: str = None) -> None:
         """
         Add a status message to screen 4.
@@ -464,13 +487,6 @@ class RQUpdate(object):
                 logging.warning(f'HAT UI not available for: {msg}')
             return
 
-        _hat = RQHAT(
-            HAT_SERIAL,
-            38400,
-            7,
-            'N',
-            1,
-            1.0)
         #
         # This method deliberately stomps on a private class variable,
         # _hat._status_lines. Since the private variable is initialized
@@ -478,13 +494,12 @@ class RQUpdate(object):
         # means to persist previous updater.py status lines and to
         # refresh the display without adding another line.
         #
-        _hat._status_lines = self._status_messages
+        self._hat._status_lines = self._status_messages
         if msg is not None:
-            _hat.status_msg(msg)
-            self._status_messages = _hat._status_lines
+            self._hat.status_msg(msg)
+            self._status_messages = self._hat._status_lines
         else:
-            _hat.show_status_msgs()
-        _hat.close()
+            self._hat.show_status_msgs()
 
     def stop_containers(self):
         """Kill any running containers."""
@@ -501,6 +516,7 @@ class RQUpdate(object):
                 logging.info(f'Stopped {container_name}')
 
         self._containers_running = False
+        self._setup_HAT()
         logging.info('Containers stopped')
         self._status_msg('Containers stopped')
         self._client.containers.prune()
@@ -661,6 +677,7 @@ class RQUpdate(object):
             # They're not running yet, but will soon be.
             #
             self._containers_running = True
+            self._close_hat()
 
             for container_name in to_start:
                 image_name = CONTAINERS[container_name]['image_name']
@@ -958,7 +975,6 @@ class RQUpdate(object):
             f'IP:{self._get_local_ip()}'
         )
         self._check_ros_logs()
-        self._status_msg()
         self._check_configs(restore=True)
         self._status_msg()
 
@@ -969,7 +985,15 @@ class RQUpdate(object):
 
         logging.info('starting RoboQuest')
         self._status_msg('starting RoboQuest')
+        self._setup_shutdown()
         while True:
+            try:
+                if GPIO.event_detected(SHUTDOWN_PIN):
+                    self._shutdown_cb('BUTTON')
+
+            except RuntimeError:
+                self._setup_shutdown()
+
             self._check_configs(restore=False)
             self._check_running_containers()
 
