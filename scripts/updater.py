@@ -35,7 +35,7 @@ from requests import get
 
 from rq_hat import RQHAT
 
-VERSION = '18rc1'
+VERSION = 18
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -379,7 +379,7 @@ class RQUpdate(object):
             timeout=GET_TIMEOUT_S
         )
         if response.status_code == 200:
-            self._all_versions['latest']['updater'] = response.text[:-1]
+            self._all_versions['latest']['updater'] = int(response.text)
         else:
             logging.warning('No Internet connectivity')
             return False
