@@ -1,6 +1,6 @@
-image_width: 640
-image_height: 480
-camera_name: ArducamUSBCamera_ArducamUSB__base_scb_pcie_7d500000_pci_0_0_usb_0_0_1_1_1_0_0c45_6366_640x480
+image_width: 1280
+image_height: 960
+camera_name: ArducamUSBCamera_ArducamUSB__base_scb_pcie_7d500000_pci_0_0_usb_0_0_1_1_1_0_0c45_6366_1280x960
 camera_matrix:
   rows: 3
   cols: 3
