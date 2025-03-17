@@ -1,8 +1,8 @@
 /**:
   ros__parameters:
     camera: 0
-    height: 960
-    width: 1280
+    height: 1200
+    width: 1600
     format: 'YUYV'
     role: 'still'
     qos_overrides:

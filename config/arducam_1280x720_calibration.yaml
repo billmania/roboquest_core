@@ -1,0 +1,26 @@
+image_width: 1280
+image_height: 720
+camera_name: ArducamUSBCamera_ArducamUSB__base_scb_pcie_7d500000_pci_0_0_usb_0_0_1_3_1_0_0c45_6366_1280x720
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [635.11259,   0.     , 670.8247 ,
+           0.     , 639.02461, 350.21039,
+           0.     ,   0.     ,   1.     ]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [-0.294859, 0.058924, 0.000528, 0.000159, 0.000000]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1., 0., 0.,
+         0., 1., 0.,
+         0., 0., 1.]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [422.75839,   0.     , 654.75625,   0.     ,
+           0.     , 568.25439, 347.45489,   0.     ,
+           0.     ,   0.     ,   1.     ,   0.     ]
