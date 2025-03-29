@@ -32,10 +32,11 @@ import RPi.GPIO as GPIO
 import docker
 
 from requests import get
+from requests.exceptions import ConnectionError as GetConnectionError
 
 from rq_hat import RQHAT
 
-VERSION = 18
+VERSION = 19
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -70,6 +71,7 @@ LOOP_PERIOD_S = 3.0
 GET_TIMEOUT_S = 9.0
 LONG_TIME = 60
 EOL = '\n'
+NULL_CHAR = '\0'
 
 #
 # When this dictionary is modified, remember to update both dstart.sh
@@ -373,22 +375,32 @@ class RQUpdate(object):
         """
         logging.info('Checking Internet connectivity')
         self._status_msg('Checking Internet')
-        response = get(
-            UPDATER_VERSION,
-            params=self._query_string(),
-            timeout=GET_TIMEOUT_S
-        )
+        try:
+            response = get(
+                UPDATER_VERSION,
+                params=self._query_string(),
+                timeout=GET_TIMEOUT_S
+            )
+        except GetConnectionError:
+            logging.warning('No Internet connectivity')
+            return False
+
         if response.status_code == 200:
             self._all_versions['latest']['updater'] = int(response.text)
         else:
             logging.warning('No Internet connectivity')
             return False
 
-        response = get(
-            FIRMWARE_VERSION,
-            params=self._query_string(),
-            timeout=GET_TIMEOUT_S
-        )
+        try:
+            response = get(
+                FIRMWARE_VERSION,
+                params=self._query_string(),
+                timeout=GET_TIMEOUT_S
+            )
+        except GetConnectionError:
+            logging.warning('No Internet connectivity')
+            return False
+
         if response.status_code == 200:
             self._all_versions['latest']['firmware'] = response.text[:-1]
         else:
@@ -638,9 +650,13 @@ class RQUpdate(object):
         """
         try:
             with open(SERIAL_NUMBER_FILE, 'r') as serial_file:
-                self._cpuserial = serial_file.read()[:-1]
+                cpuserial_raw = serial_file.read()
+            self._cpuserial = ''.join(filter(
+                lambda character: character != NULL_CHAR,
+                cpuserial_raw
+            ))
 
-            logging.info(f'CPU serial {self._cpuserial[:-1]}')
+            logging.info(f'CPU serial {self._cpuserial}')
             self._unique_id = (
                 int(self._cpuserial, base=16)
                 % 100) + 1
