@@ -1,0 +1,26 @@
+image_width: 1600
+image_height: 1200
+camera_name: UVCCamera_046d_0990___base_scb_pcie_7d500000_pci_0_0_usb_0_0_1_3_1_0_046d_0990_1600x1200.yaml
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [1562.52984,    0.     ,  745.44505,
+            0.     , 1569.10769,  620.81802,
+            0.     ,    0.     ,    1.     ]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [-0.001720, -0.123874, 0.004809, -0.003152, 0.000000]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1., 0., 0.,
+         0., 1., 0.,
+         0., 0., 1.]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [1545.50146,    0.     ,  738.72844,    0.     ,
+            0.     , 1562.79993,  623.98029,    0.     ,
+            0.     ,    0.     ,    1.     ,    0.     ]
