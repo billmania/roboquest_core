@@ -3,6 +3,7 @@
     camera: 3
     height: 480
     width: 640
+    format: 'YUYV'
     role: still
     qos_overrides:
       /parameter_events:
