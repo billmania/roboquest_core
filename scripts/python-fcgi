@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""WSGI server for backup and restore of configuration."""
+
+from flup.server.fcgi import WSGIServer
+
+
+def application(environ, start_response):
+    """Process the received data."""
+    content_length = (
+        int(environ.get('CONTENT_LENGTH', 0))
+        if environ.get('CONTENT_LENGTH')
+        else 0
+    )
+
+    post_data = (
+        environ['wsgi.input'].read(content_length)
+        if content_length
+        else b''
+    )
+
+    if environ.get('CONTENT_TYPE', '').startswith('application/gzip'):
+        data = post_data
+    else:
+        data = post_data.decode('utf-8')
+
+    status = '200 OK'
+    headers = [('Content-type', 'text/html')]
+    start_response(status, headers)
+
+    response_body = (
+        '<html><body>\n'
+        '<h1>POST query_string:</h1><pre>'
+        f'{environ.get("QUERY_STRING", "")}</pre>\n'
+        '<h1>POST content_type:</h1><pre>'
+        f'{environ.get("CONTENT_TYPE", "")}</pre>\n'
+        '<h1>POST length:</h1><pre>'
+        f'{environ.get("CONTENT_LENGTH")}</pre>\n'
+        '</body></html>\n'
+    )
+
+    return [response_body.encode('utf-8')]
+
+
+if __name__ == '__main__':
+    WSGIServer(application).run()
