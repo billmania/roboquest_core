@@ -17,8 +17,12 @@ def save_data(file_name, file_content) -> None:
     Disable any malicious-ness in file_name and then save
     file_content in a file named file_name.
     """
-    # TODO: Clean file_name
-    full_path = BACKUP_DIR / file_name
+    last_slash_index = file_name.rfind('/')
+    if last_slash_index > -1:
+        clean_file_name = file_name[last_slash_index+1:]
+    else:
+        clean_file_name = file_name
+    full_path = BACKUP_DIR / clean_file_name
     full_path.unlink(missing_ok=True)
     with open(full_path, mode='wb') as file:
         file.write(file_content)
@@ -50,14 +54,13 @@ def application(environ, start_response):
         save_data(query_string, data)
 
     except Exception:
-        # TODO: Correct the status to something in the 400 series
-        status = '200 OK'
+        status = '500 '
         headers = [('Content-type', 'text/html')]
         start_response(status, headers)
         response_body = ''
 
     else:
-        status = '200 OK'
+        status = '200 '
         headers = [('Content-type', 'text/html')]
         start_response(status, headers)
 
