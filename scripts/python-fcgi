@@ -1,7 +1,27 @@
 #!/usr/bin/env python3
 """WSGI server for backup and restore of configuration."""
 
+from pathlib import Path
+from time import sleep
+
 from flup.server.fcgi import WSGIServer
+
+
+BACKUP_DIR = Path('/var/www/backups')
+LOG_DIR = '/var/www/cgi'
+
+
+def save_data(file_name, file_content) -> None:
+    """Save the file contents.
+
+    Disable any malicious-ness in file_name and then save
+    file_content in a file named file_name.
+    """
+    # TODO: Clean file_name
+    full_path = BACKUP_DIR / file_name
+    full_path.unlink(missing_ok=True)
+    with open(full_path, mode='wb') as file:
+        file.write(file_content)
 
 
 def application(environ, start_response):
@@ -10,6 +30,9 @@ def application(environ, start_response):
         int(environ.get('CONTENT_LENGTH', 0))
         if environ.get('CONTENT_LENGTH')
         else 0
+    )
+    query_string = (
+        environ.get('QUERY_STRING', None)
     )
 
     post_data = (
@@ -23,23 +46,40 @@ def application(environ, start_response):
     else:
         data = post_data.decode('utf-8')
 
-    status = '200 OK'
-    headers = [('Content-type', 'text/html')]
-    start_response(status, headers)
+    try:
+        save_data(query_string, data)
 
-    response_body = (
-        '<html><body>\n'
-        '<h1>POST query_string:</h1><pre>'
-        f'{environ.get("QUERY_STRING", "")}</pre>\n'
-        '<h1>POST content_type:</h1><pre>'
-        f'{environ.get("CONTENT_TYPE", "")}</pre>\n'
-        '<h1>POST length:</h1><pre>'
-        f'{environ.get("CONTENT_LENGTH")}</pre>\n'
-        '</body></html>\n'
-    )
+    except Exception:
+        # TODO: Correct the status to something in the 400 series
+        status = '200 OK'
+        headers = [('Content-type', 'text/html')]
+        start_response(status, headers)
+        response_body = ''
+
+    else:
+        status = '200 OK'
+        headers = [('Content-type', 'text/html')]
+        start_response(status, headers)
+
+        response_body = (
+            '<html><body>\n'
+            '<h1>POST query_string:</h1><pre>'
+            f'{environ.get("QUERY_STRING", "")}</pre>\n'
+            '<h1>POST content_type:</h1><pre>'
+            f'{environ.get("CONTENT_TYPE", "")}</pre>\n'
+            '<h1>POST length:</h1><pre>'
+            f'{environ.get("CONTENT_LENGTH")}</pre>\n'
+            '</body></html>\n'
+        )
 
     return [response_body.encode('utf-8')]
 
 
 if __name__ == '__main__':
-    WSGIServer(application).run()
+    max_tries = 10
+    while max_tries:
+        try:
+            WSGIServer(application).run()
+        except Exception:
+            max_tries -= 1
+            sleep(30.0)
