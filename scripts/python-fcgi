@@ -7,8 +7,7 @@ from time import sleep
 from flup.server.fcgi import WSGIServer
 
 
-BACKUP_DIR = Path('/var/www/backups')
-LOG_DIR = '/var/www/cgi'
+BACKUP_DIR = Path('/var/www/html/archives')
 
 
 def save_data(file_name, file_content) -> None:
@@ -45,10 +44,17 @@ def application(environ, start_response):
         else b''
     )
 
-    if environ.get('CONTENT_TYPE', '').startswith('application/gzip'):
+    if environ.get('CONTENT_TYPE', '').startswith(
+        'application/x-gtar-compressed'
+    ):
         data = post_data
     else:
-        data = post_data.decode('utf-8')
+        status = '400 '
+        headers = [('Content-type', 'text/html')]
+        start_response(status, headers)
+        response_body = 'Content-type must be application/x-gtar-compressed'
+
+        return [response_body.encode('utf-8')]
 
     try:
         save_data(query_string, data)

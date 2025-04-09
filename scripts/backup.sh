@@ -29,12 +29,12 @@ name_tar_file ()
 collect_files ()
 {
     cd $PERSIST_DIR || return
-    tar czf "${TMP_DIR}/$1.tgz" ${FILES_TO_BACKUP}
+    tar --ignore-failed-read --create --gzip --file "${TMP_DIR}/$1.tgz" ${FILES_TO_BACKUP}
 }
 
 save_files ()
 {
-    curl -l -H 'Content-type: application/gzip' --data-binary "@${TMP_DIR}/$1.tgz" ${BACKUP_URL}?$1
+    curl -H 'Content-type: application/x-gtar-compressed' --data-binary "@${TMP_DIR}/$1.tgz" "${BACKUP_URL}?$1"
 }
 
 tar_file=$(name_tar_file)
