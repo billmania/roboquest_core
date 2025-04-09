@@ -16,25 +16,25 @@ get_serial ()
     cat $SERIAL_NUMBER_FILE
 }
 
-name_tar_file ()
+name_archive_file ()
 {
-    TAR_FILE=$(get_serial)_config.tgz
+    TAR_FILE=$(get_serial)_config
     echo "${TAR_FILE}"
 }
 
 retrieve_files ()
 {
-    curl -X GET --output "$1" "${RESTORE_URL}/$1" 
+    curl -X GET --output "${TMP_DIR}/$1.tgz" "${RESTORE_URL}/$1" 
 }
 
 extract_files ()
 {
     cd $PERSIST_DIR || return
-    tar xzf "${TMP_DIR}/$1"
+    tar xzf "${TMP_DIR}/$1.tgz"
 }
 
-tar_file=$(name_tar_file)
-retrieve_files "$tar_file"
-extract_files "$tar_file"
+archive_file=$(name_archive_file)
+retrieve_files "$archive_file"
+extract_files "$archive_file"
 
 exit 0
