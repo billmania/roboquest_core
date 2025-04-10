@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""WSGI server for backup and restore of configuration."""
+
+from pathlib import Path
+from time import sleep
+
+from flup.server.fcgi import WSGIServer
+
+
+BACKUP_DIR = Path('/var/www/html/archives')
+
+
+def save_data(file_name, file_content) -> None:
+    """Save the file contents.
+
+    Disable any malicious-ness in file_name and then save
+    file_content in a file named file_name.
+    """
+    last_slash_index = file_name.rfind('/')
+    if last_slash_index > -1:
+        clean_file_name = file_name[last_slash_index+1:]
+    else:
+        clean_file_name = file_name
+    full_path = BACKUP_DIR / clean_file_name
+    full_path.unlink(missing_ok=True)
+    with open(full_path, mode='wb') as file:
+        file.write(file_content)
+
+
+def application(environ, start_response):
+    """Process the received data."""
+    content_length = (
+        int(environ.get('CONTENT_LENGTH', 0))
+        if environ.get('CONTENT_LENGTH')
+        else 0
+    )
+    query_string = (
+        environ.get('QUERY_STRING', None)
+    )
+
+    post_data = (
+        environ['wsgi.input'].read(content_length)
+        if content_length
+        else b''
+    )
+
+    if environ.get('CONTENT_TYPE', '').startswith(
+        'application/x-gtar-compressed'
+    ):
+        data = post_data
+    else:
+        status = '400 '
+        headers = [('Content-type', 'text/html')]
+        start_response(status, headers)
+        response_body = 'Content-type must be application/x-gtar-compressed'
+
+        return [response_body.encode('utf-8')]
+
+    try:
+        save_data(query_string, data)
+
+    except Exception:
+        status = '500 '
+        headers = [('Content-type', 'text/html')]
+        start_response(status, headers)
+        response_body = ''
+
+    else:
+        status = '200 '
+        headers = [('Content-type', 'text/html')]
+        start_response(status, headers)
+
+        response_body = (
+            '<html><body>\n'
+            '<h1>POST query_string:</h1><pre>'
+            f'{environ.get("QUERY_STRING", "")}</pre>\n'
+            '<h1>POST content_type:</h1><pre>'
+            f'{environ.get("CONTENT_TYPE", "")}</pre>\n'
+            '<h1>POST length:</h1><pre>'
+            f'{environ.get("CONTENT_LENGTH")}</pre>\n'
+            '</body></html>\n'
+        )
+
+    return [response_body.encode('utf-8')]
+
+
+if __name__ == '__main__':
+    max_tries = 10
+    while max_tries:
+        try:
+            WSGIServer(application).run()
+        except Exception:
+            max_tries -= 1
+            sleep(30.0)
