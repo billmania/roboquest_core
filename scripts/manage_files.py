@@ -79,14 +79,51 @@ class ManageFiles(object):
                 config_file_content.text
             )
 
+    def _remove_file(self, full_path) -> None:
+        """Remove the file."""
+        try:
+            remove_path = Path(full_path)
+            remove_path.unlink(missing_ok=True)
+
+        except Exception as e:
+            self._log_warning(
+                f'Failed to remove {full_path}'
+                f' Exception: {e}'
+            )
+
     def remove_files(self) -> None:
         """Remove files.
 
         Use the file management object to get the list of files
-        to remove. Remove those files.
+        to remove. Remove those files. If the file to be removed
+        has changed on the robot, it won't be removed, unless the
+        "force" attribute is set.
         """
         for file in self._config_file['remove']:
-            continue
+            full_path = file['full_path']
+
+            if not Path(full_path).exists():
+                continue
+
+            try:
+                if not self._file_changed(
+                    full_path,
+                    file['md5sum']
+                ) or file['force']:
+                    self._log_info(
+                        f'Removing: {full_path}'
+                    )
+                    self._remove_file(full_path)
+                else:
+                    self._log_warning(
+                        f'{full_path} note removed. set "force"'
+                    )
+
+            except Exception as e:
+                self._log_warning(
+                    f'Exception removing: {full_path}'
+                    f' : {e}'
+                )
 
     def _file_changed(self, full_path, md5sum) -> bool:
         """Check the state of the file.
