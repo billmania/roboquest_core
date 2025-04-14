@@ -10,7 +10,7 @@ from json import loads as jloads
 from os import chown
 from pathlib import Path
 from pwd import getpwnam
-from typing import Callable
+from types import ModuleType
 
 from requests import get
 
@@ -24,7 +24,7 @@ GET_TIMEOUT_S = 5.0
 class ManageFiles(object):
     """Manage file installation and removal."""
 
-    def __init__(self, logging: Callable):
+    def __init__(self, logging: ModuleType = None):
         """Prepare to manage files."""
         if logging:
             self._log_info = logging.info
