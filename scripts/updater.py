@@ -36,7 +36,7 @@ from requests.exceptions import ConnectionError as GetConnectionError
 
 from rq_hat import RQHAT
 
-VERSION = 19
+VERSION = 20
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -64,6 +64,7 @@ IMAGE_VERSIONS = 'http://registry.q4excellence.com:8079/image_versions.json'
 ALL_VERSIONS = OS_PERSIST_DIR + '/versions.json'
 UPDATE_SCRIPT = 'updater.py'
 URL_BASE = 'http://registry.q4excellence.com:8079/'
+MANAGE_FILES_MODULE = 'manage_files.py'
 UPDATE_URL = URL_BASE + UPDATE_SCRIPT
 CERT_FILE = 'cert.pem'
 KEY_FILE = 'key.pem'
@@ -339,33 +340,49 @@ class RQUpdate(object):
 
         return None
 
-    def _update_other_files(self):
+    def _install_manage_files(self) -> None:
+        """Install the ManageFiles module."""
+        logging.info('Installing the ManageFiles module')
+        try:
+            response = get(
+                URL_BASE + MANAGE_FILES_MODULE,
+                timeout=GET_TIMEOUT_S
+            )
+
+        except GetConnectionError:
+            logging.warning('No Internet connectivity')
+            return
+
+        if response.status_code == 200:
+            with open(MANAGE_FILES_MODULE, 'w') as f:
+                f.write(response.text)
+            Path(MANAGE_FILES_MODULE).chmod(0o444)
+        else:
+            logging.warning(
+                f'Failed to retrieve {MANAGE_FILES_MODULE}'
+            )
+
+    def _update_files(self):
         """
-        Update with new files.
+        Update the local files.
 
-        Retrieve other files from the registry, which are required by
-        updater.py.
+        Use the ManageFiles class to maintain the files
+        installed locally. If the module isn't  already
+        installed, cause it to be installed and then force
+        a restart of updater.py.
         """
-        success = True
+        try:
+            from manage_files import ManageFiles
 
-        for other_file in [CERT_FILE, KEY_FILE]:
-            other_file_path = UPDATER_DIR + '/' + other_file
-            if not Path(other_file_path).exists():
-                file_content = get(
-                    URL_BASE + other_file,
-                    timeout=GET_TIMEOUT_S
-                )
-                if file_content.status_code == 200:
-                    Path(other_file_path).touch(mode=0o440)
-                    with open(other_file_path, 'w') as f:
-                        f.write(file_content.text)
-                    logging.info(f'Installed {other_file_path}')
-                else:
-                    logging.warning(f'Failed to install {other_file_path}')
-                    success = False
+        except ModuleNotFoundError:
+            self._install_manage_files()
+            logging.warning('Restarting updater.py')
+            exit(0)
 
-        if not success:
-            self._status_msg('Check Internet connection')
+        MF = ManageFiles(logging)
+        MF.get_config_file()
+        MF.install_files()
+        MF.remove_files()
 
     def _Internet_connected(self) -> bool:
         """
@@ -980,7 +997,7 @@ class RQUpdate(object):
         The loop for monitoring the containers and watching for
         a command to update the containers.
         """
-        self._update_other_files()
+        self._update_files()
         self._start_log_server()
         self._publish_versions()
         self._status_msg(
