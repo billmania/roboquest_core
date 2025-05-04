@@ -36,7 +36,7 @@ from requests.exceptions import ConnectionError as GetConnectionError
 
 from rq_hat import RQHAT
 
-VERSION = 20
+VERSION = '21'
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
@@ -341,8 +341,14 @@ class RQUpdate(object):
         return None
 
     def _install_manage_files(self) -> None:
-        """Install the ManageFiles module."""
-        logging.info('Installing the ManageFiles module')
+        """
+        Install the ManageFiles module.
+
+        Make one attempt to install the module. If Internet
+        connectivity isn't available, the module will not be
+        installed.
+        """
+        logging.info('Attempting to install ManageFiles module')
         try:
             response = get(
                 URL_BASE + MANAGE_FILES_MODULE,
@@ -350,17 +356,19 @@ class RQUpdate(object):
             )
 
         except GetConnectionError:
-            logging.warning('No Internet connectivity')
+            logging.warning(f'Failed to retrieve {MANAGE_FILES_MODULE}')
             return
 
-        if response.status_code == 200:
-            with open(MANAGE_FILES_MODULE, 'w') as f:
-                f.write(response.text)
-            Path(MANAGE_FILES_MODULE).chmod(0o444)
         else:
-            logging.warning(
-                f'Failed to retrieve {MANAGE_FILES_MODULE}'
-            )
+            if response.status_code == 200:
+                with open(MANAGE_FILES_MODULE, 'w') as f:
+                    f.write(response.text)
+                Path(MANAGE_FILES_MODULE).chmod(0o444)
+            else:
+                logging.warning(
+                    f'Failed to install {MANAGE_FILES_MODULE}'
+                )
+        logging.info('Installed ManageFiles module')
 
     def _update_files(self):
         """
@@ -368,21 +376,21 @@ class RQUpdate(object):
 
         Use the ManageFiles class to maintain the files
         installed locally. If the module isn't  already
-        installed, cause it to be installed and then force
-        a restart of updater.py.
+        installed, cause it to be installed and ready for
+        the next time updater.py is started.
         """
         try:
             from manage_files import ManageFiles
 
         except ModuleNotFoundError:
             self._install_manage_files()
-            logging.warning('Restarting updater.py')
-            exit(0)
 
-        MF = ManageFiles(logging)
-        MF.get_config_file()
-        MF.install_files()
-        MF.remove_files()
+        else:
+            if self._Internet_connected():
+                MF = ManageFiles(logging)
+                MF.get_config_file()
+                MF.install_files()
+                MF.remove_files()
 
     def _Internet_connected(self) -> bool:
         """
@@ -403,9 +411,9 @@ class RQUpdate(object):
             return False
 
         if response.status_code == 200:
-            self._all_versions['latest']['updater'] = int(response.text)
+            self._all_versions['latest']['updater'] = response.text[:-1]
         else:
-            logging.warning('No Internet connectivity')
+            logging.warning('Failed to extract updater.py version')
             return False
 
         try:
