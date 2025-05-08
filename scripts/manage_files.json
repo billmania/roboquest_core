@@ -1,0 +1,62 @@
+{
+  "install": [
+    {
+      "source": "cert.pem",
+      "md5sum": "5b84aa5aece7d25605f1b069f2b8958b",
+      "details": {
+        "full_path": "/opt/updater/cert.pem",
+        "owner": "root",
+        "group": "root",
+        "mode": 288
+      }
+    },
+    {
+      "source": "key.pem",
+      "md5sum": "888c938240def0a3590107bf86dd5cf8",
+      "details": {
+        "full_path": "/opt/updater/key.pem",
+        "owner": "root",
+        "group": "root",
+        "mode": 288
+      }
+    },
+    {
+      "source": "register.sh",
+      "md5sum": "bd7a9e1d897a007585067caa1ac350d6",
+      "details": {
+        "full_path": "/usr/local/bin/register.sh",
+        "owner": "root",
+        "group": "root",
+        "mode": 360
+      }
+    },
+    {
+      "source": "backup.sh",
+      "md5sum": "48824a0bd38bce720d6c6188d85d7f32",
+      "details": {
+        "full_path": "/usr/local/bin/backup.sh",
+        "owner": "root",
+        "group": "root",
+        "mode": 360
+      }
+    },
+    {
+      "source": "restore.sh",
+      "md5sum": "d94ad0f8f4282192faa6f11b55e9b476",
+      "details": {
+        "full_path": "/usr/local/bin/restore.sh",
+        "owner": "root",
+        "group": "root",
+        "mode": 360
+      }
+    }
+  ],
+
+  "remove": [
+    {
+      "full_path": "/tmp/test",
+      "md5sum": "48824a0bd38bce720d6c6188d85d7f32",
+      "force": true
+    }
+  ]
+}
