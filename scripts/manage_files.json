@@ -22,7 +22,7 @@
     },
     {
       "source": "register.sh",
-      "md5sum": "bd7a9e1d897a007585067caa1ac350d6",
+      "md5sum": "e7dbec898b8aa72b5a2bf205bc245c92",
       "details": {
         "full_path": "/usr/local/bin/register.sh",
         "owner": "root",

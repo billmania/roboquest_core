@@ -9,7 +9,7 @@ REGISTER_URL="https://registry.q4excellence.com:5678/register"
 
 get_serial ()
 {
-    cat $SERIAL_NUMBER_FILE
+    sed -e 's/\x00$//' < $SERIAL_NUMBER_FILE
 }
 
 get_user_name ()
@@ -22,8 +22,10 @@ register_robot ()
         curl ${REGISTER_URL}?serial="$1"\&user="$2"
 }
 
-raw_user_name=$1
+user_name=$(get_user_name "$1")
+serial_number=$(get_serial)
+register_robot "${serial_number}" "${user_name}"
 
-register_robot $(get_serial) $(get_user_name "${raw_user_name}")
+echo "Registered user ${user_name}"
 
 exit 0
