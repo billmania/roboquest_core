@@ -7,18 +7,45 @@ from launch_ros.actions import Node
 
 from pathlib import Path
 
+PERSIST_DIR = (
+    get_package_share_directory('roboquest_core') +
+    '/persist'
+)
 I2C_YAML_FILE = 'i2c.yaml'
 I2C_PARAM_FILE = (
-    '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist' +
-    '/i2c' +
-    '/' +
+    PERSIST_DIR +
+    '/i2c/' +
     I2C_YAML_FILE
 )
 USER_LAUNCH_FILE = (
-    '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist' +
-    '/nodes' +
-    '/user_nodes.launch.py'
+    PERSIST_DIR +
+    '/nodes/user_nodes.launch.py'
 )
+CALIBRATION_DIR = (
+    PERSIST_DIR +
+    '/calibration'
+)
+CAMERA_INFO_DIR = (
+    '/root/.ros/camera_info'
+)
+
+
+def get_calibration_files(src_dir: Path, dest_dir: Path) -> None:
+    """Get camera calibration files.
+
+    Look in src_dir for calibration files. If any exist, copy
+    them to dest_dir. Any file in src_dir and ending with '.yaml'
+    is assumed to be a calibration file.
+    """
+    for calibration_file in src_dir.rglob('*.yaml'):
+        if not calibration_file.is_file():
+            continue
+
+        dest_file = (
+            dest_dir /
+            calibration_file.name
+        )
+        dest_file.write_text(calibration_file.read_text())
 
 
 def generate_launch_description():
@@ -41,6 +68,9 @@ def generate_launch_description():
         'config',
         'i2c.yaml'
     )
+
+    get_calibration_files(Path(CALIBRATION_DIR), Path(CAMERA_INFO_DIR))
+
     camera0_params = os.path.join(
         get_package_share_directory('roboquest_core'),
         'config',
