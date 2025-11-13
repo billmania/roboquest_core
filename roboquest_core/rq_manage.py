@@ -42,7 +42,7 @@ from rq_msgs.srv import Control
 
 from std_srvs.srv import Empty
 
-VERSION = '25'
+VERSION = '25.1rc3'
 
 MODULE_DIR = (
     '/usr/src/ros2ws'
