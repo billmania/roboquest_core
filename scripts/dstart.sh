@@ -12,7 +12,7 @@ PERSIST_DIR="/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist
 #docker run -it --rm --privileged --network host --ipc host --env "ROS_DOMAIN_ID=${ROS_DOMAIN_ID}" --device /dev/gpiomem:/dev/gpiomem --device /dev/i2c-1:/dev/i2c-1 --device /dev/i2c-6:/dev/i2c-6 --device /dev/ttyS0:/dev/ttyS0 -v /dev/shm:/dev/shm -v /var/run/dbus:/var/run/dbus -v /run/udev:/run/udev -v /opt/persist:${PERSIST_DIR} -v ros_logs:/root/.ros/log --name $NAME "$IMAGE"
 
 printf "Starting %s on %s\n" "$IMAGE" "$(docker context show)"
-docker run -it --rm \
+docker run -d --rm \
         --privileged \
         --network host \
         --ipc host \
