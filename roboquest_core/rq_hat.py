@@ -172,9 +172,10 @@ class RQHAT(object):
             self._hat.reset_input_buffer()
             self._hat.reset_output_buffer()
 
-        except serial.SerialException as e:
+        except serial.SerialException:
+            self._hat = None
             raise Exception(
-                f'Failed to setup {port}: {e}'
+                f'Failed to open HAT serial port {port}'
             )
 
     def write_sentence(self, sentence: str) -> None:
