@@ -9,7 +9,6 @@ timestamp=1573081320
 [wifi]
 mac-address-blacklist=
 mode=infrastructure
-seen-bssids=18:64:72:40:85:56;18:64:72:40:88:F6;18:64:72:40:89:26;18:64:72:40:89:36;18:64:72:40:8B:16;18:64:72:40:8E:E6;18:64:72:40:99:06;18:64:72:40:99:16;18:64:72:40:C5:65;18:64:72:40:C5:75;A8:BD:27:CB:EB:90;C8:B5:AD:64:04:B1;C8:B5:AD:6C:E9:E1;C8:B5:AD:6C:E9:F1;
 ssid=VCS
 
 [wifi-security]
