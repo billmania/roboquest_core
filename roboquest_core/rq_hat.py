@@ -174,6 +174,9 @@ class RQHAT(object):
 
         except serial.SerialException:
             self._hat = None
+            raise Exception(
+                f'Failed to open HAT serial port {port}'
+            )
 
     def write_sentence(self, sentence: str) -> None:
         """Encode from ASCII and then write the sentence."""

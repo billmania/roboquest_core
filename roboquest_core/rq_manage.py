@@ -95,13 +95,23 @@ class RQManage(RQNode):
         self._setup_ros_graph()
 
         self._timeout_sec = 1 / self._parameters['hat_comms_read_hz']
-        self._hat = RQHAT(port=self._parameters['hat_port'],
-                          data_rate=self._parameters['hat_data_rate'],
-                          data_bits=self._parameters['hat_data_bits'],
-                          parity=self._parameters['hat_parity'],
-                          stop_bits=self._parameters['hat_stop_bits'],
-                          read_timeout_sec=self._timeout_sec,
-                          serial_errors_cb=None)
+        try:
+            self._hat = RQHAT(port=self._parameters['hat_port'],
+                              data_rate=self._parameters['hat_data_rate'],
+                              data_bits=self._parameters['hat_data_bits'],
+                              parity=self._parameters['hat_parity'],
+                              stop_bits=self._parameters['hat_stop_bits'],
+                              read_timeout_sec=self._timeout_sec,
+                              serial_errors_cb=None)
+            self.get_logger().info(
+                f"Opened HAT serial port {self._parameters['hat_port']}"
+            )
+
+        except Exception as e:
+            self.get_logger().error(
+                f'Failed to connect RQHAT: {e}'
+            )
+
         self._network = RQNetwork(
             self.get_logger().warning,
             self._hat.pad_line,
