@@ -1,13 +1,20 @@
+#
+# Verified on debian trixie.
+#
 [connection]
 id=VCS
-uuid=a06b74f5-f6a2-49bf-81a1-9dd555a00b73
+#
+# Use the uuidgen utility from the uuid-runtime debian package.
+#
+uuid=<UUID>
 type=wifi
-autoconnect=true                                                                
-permissions=
-timestamp=1573081320
+autoconnect=true
+#
+# Use "date +%s"
+#
+timestamp=<TIMESTAMP>
 
 [wifi]
-mac-address-blacklist=
 mode=infrastructure
 ssid=VCS
 
@@ -16,17 +23,19 @@ key-mgmt=wpa-eap
 
 [802-1x]
 eap=peap;
-identity=<EAP_IDENTITY>
-password=<EAP_PASSWORD>
+#
+# Add the IDENTITY and PASSWORD without surrounding quotation
+# marks or apostrophes.
+#
+identity=<IDENTITY>
+password=<PASSWORD>
 phase2-auth=mschapv2
 
 [ipv4]
-dns-search=
 method=auto
 
 [ipv6]
-addr-gen-mode=stable-privacy
-dns-search=
+addr-gen-mode=default
 method=auto
 
 [proxy]
