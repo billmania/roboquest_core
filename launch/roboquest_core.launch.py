@@ -7,8 +7,9 @@ from launch_ros.actions import Node
 
 from pathlib import Path
 
+PKG_SHARE_DIR = get_package_share_directory('roboquest_core')
 PERSIST_DIR = (
-    get_package_share_directory('roboquest_core') +
+    PKG_SHARE_DIR +
     '/persist'
 )
 I2C_YAML_FILE = 'i2c.yaml'
@@ -52,42 +53,48 @@ def generate_launch_description():
     if Path(I2C_PARAM_FILE).exists():
         src = Path(I2C_PARAM_FILE)
         dest = (
-            Path(get_package_share_directory('roboquest_core')) /
+            Path(PKG_SHARE_DIR) /
                 'config' /
             I2C_YAML_FILE
         )
         dest.write_text(src.read_text())
 
     base_params = os.path.join(
-        get_package_share_directory('roboquest_core'),
+        PKG_SHARE_DIR,
         'config',
         'roboquest_base.yaml'
     )
     i2c_params = os.path.join(
-        get_package_share_directory('roboquest_core'),
+        PKG_SHARE_DIR,
         'config',
         'i2c.yaml'
     )
 
     get_calibration_files(Path(CALIBRATION_DIR), Path(CAMERA_INFO_DIR))
 
-    camera0_params = os.path.join(
-        get_package_share_directory('roboquest_core'),
-        'config',
-        'rq_camera0.yaml'
-    )
+
+    cam_params = Path(PERSIST_DIR) / 'rq_camera0.yaml'
+    if cam_params.exists():
+        camera0_params = str(cam_params)
+    else:
+        camera0_params = os.path.join(
+            PKG_SHARE_DIR,
+            'config',
+            'rq_camera0.yaml'
+        )
+
     camera1_params = os.path.join(
-        get_package_share_directory('roboquest_core'),
+        PKG_SHARE_DIR,
         'config',
         'rq_camera1.yaml'
     )
     camera2_params = os.path.join(
-        get_package_share_directory('roboquest_core'),
+        PKG_SHARE_DIR,
         'config',
         'rq_camera2.yaml'
     )
     camera3_params = os.path.join(
-        get_package_share_directory('roboquest_core'),
+        PKG_SHARE_DIR,
         'config',
         'rq_camera3.yaml'
     )
