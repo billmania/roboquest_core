@@ -63,7 +63,7 @@ class CamTool(object):
         parser.add_argument(
             '--resolution',
             dest='resolution',
-            default='640x480',
+            default=0,
             help=resolution_help,
             type=int
         )
