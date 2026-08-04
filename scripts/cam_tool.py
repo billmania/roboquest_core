@@ -8,16 +8,18 @@ Executed via an ssh terminal session as root on the robot.
 
 import argparse
 import logging
+from fcntl import ioctl
 from glob import glob
-from pathlib import Path
 from re import sub
+from socket import AF_INET, SOCK_DGRAM, socket
+from struct import pack
 from subprocess import run
-from sys import exit as sys_exit
+from urllib.request import urlopen
 
 from yaml import dump, safe_load
 
 
-VERSION = '1'
+VERSION = '2'
 RESOLUTIONS = [
     '640x480',
     '1296x972',
@@ -25,11 +27,13 @@ RESOLUTIONS = [
     '2592x1944'
 ]
 MIN_FRAME_RATE = 1
-DEFAULT_FRAME_RATE = 10
 MAX_FRAME_RATE = 25
 MICROSECS_PER_SEC = 1000000
 CAM_PARAMS_FILE = '/opt/persist/rq_camera0.yaml'
 CALIBRATION_DIR = '/opt/persist/calibration'
+INTERFACE = 'eth0'
+CALIBRATION_URL_BASE = 'http://registry.q4excellence.com:8079/calibration/'
+DEFAULT_CALIBRATION_ROBOT = 'rq-23eb'
 
 
 class CamTool(object):
@@ -63,16 +67,23 @@ class CamTool(object):
         parser.add_argument(
             '--resolution',
             dest='resolution',
-            default=0,
+            default=None,
             help=resolution_help,
             type=int
         )
         parser.add_argument(
             '--frame_rate',
             dest='frame_rate',
-            default=DEFAULT_FRAME_RATE,
+            default=None,
             help=f'[{MIN_FRAME_RATE}, {MAX_FRAME_RATE}]',
             type=int
+        )
+        parser.add_argument(
+            '--robot_name',
+            dest='robot_name',
+            default=None,
+            help='Calibration files for which robot hostname',
+            type=str
         )
 
         return parser.parse_args()
@@ -89,7 +100,7 @@ class CamTool(object):
         )
         return frame_limit
 
-    def _get_device_name(self, resolution: int) -> str:
+    def _get_camera_name(self) -> str:
         """Get the device name."""
         output = run(
             [
@@ -109,138 +120,212 @@ class CamTool(object):
             '_'
         )
         logging.debug(
-            '_get_device_name:'
+            '_get_camera_name:'
             f' {device_name}'
         )
         return device_name
 
-    def _form_camera_name(
-         self,
-         resolution: str) -> str:
-        """Make a camera name string."""
-        device_name = self._get_device_name(resolution)
+    def _form_camera_name(self) -> str:
+        """Make a camera name string.
 
-        camera_name = device_name + RESOLUTIONS[resolution]
+        It includes only the module and the device path. The
+        resolution is not included.
+        """
+        device_name = self._get_device_name()
+
+        camera_name = device_name
         logging.debug(
             '_form_camera_name:'
             f' {camera_name}'
         )
         return camera_name
 
-    def _adjust_params(self, resolution: int):
+    def _get_camera_parameters(self):
+        """Get the old camera parameters."""
+        with open(CAM_PARAMS_FILE, 'r') as f:
+            self._old_camera_parameters = safe_load(f)
+
+        self._old_resolution = (
+            f"{(
+                self._old_camera_parameters
+                ['/**']
+                ['ros__parameters']
+                ['width']
+               )}"
+            'x'
+            f"{(
+                self._old_camera_parameters
+                ['/**']
+                ['ros__parameters']
+                ['height']
+               )}"
+        )
+
+    def _adjust_params(self):
         """Adjust the params file.
 
         Adjust the height, width, and FrameDurationLimits.
         """
-        frame_rate = self._calculate_frame_rate(self._parsed_args.frame_rate)
+        if (
+             not self._parsed_args.frame_rate
+             and not self._parsed_args.resolution):
+            logging.info(
+                'Parameters not changed.'
+            )
+            return
 
-        with open(CAM_PARAMS_FILE, 'r') as f:
-            params = safe_load(f)
-#         logging.debug(
-#             '_adjust_params:'
-#             f' Old parameters: {dump(params)}'
-#         )
+        if self._parsed_args.resolution is not None:
+            logging.debug(
+                '_adjust_params:'
+                f' Old resolution: {self._old_resolution}'
+            )
+            self._old_camera_parameters['/**']['ros__parameters']['height'] = (
+                int(RESOLUTIONS[self._parsed_args.resolution].split('x')[1])
+            )
+            self._old_camera_parameters['/**']['ros__parameters']['width'] = (
+                int(RESOLUTIONS[self._parsed_args.resolution].split('x')[0])
+            )
 
-        self._old_resolution = (
-            f"{params['/**']['ros__parameters']['width']}"
-            'x'
-            f"{params['/**']['ros__parameters']['height']}"
-        )
-        logging.debug(
-            '_adjust_params:'
-            f' Old resolution: {self._old_resolution}'
-        )
-
-        params['/**']['ros__parameters']['height'] = (
-            int(RESOLUTIONS[resolution].split('x')[1])
-        )
-        params['/**']['ros__parameters']['width'] = (
-            int(RESOLUTIONS[resolution].split('x')[0])
-        )
-        params['/**']['ros__parameters']['FrameDurationLimits'] = [
-            frame_rate,
-            frame_rate
-        ]
+        if self._parsed_args.frame_rate is not None:
+            old_frame_rate = (
+                MICROSECS_PER_SEC
+                / int(
+                    self._old_camera_parameters
+                    ['/**']
+                    ['ros__parameters']
+                    ['FrameDurationLimits']
+                    [0]
+                  )
+            )
+            logging.debug(
+                '_adjust_params:'
+                f' Old frame rate: {int(old_frame_rate)}'
+            )
+            frame_limit = self._calculate_frame_rate(
+                self._parsed_args.frame_rate
+            )
+            (self._old_camera_parameters
+             ['/**']
+             ['ros__parameters']
+             ['FrameDurationLimits']) = [frame_limit, frame_limit]
 
         with open(CAM_PARAMS_FILE, 'w') as f:
-            dump(params, f)
+            dump(self._old_camera_parameters, f)
 
-#         logging.debug(
-#             '_adjust_params'
-#             f' New parameters: {dump(params)}'
-#         )
+    def _get_robot_name(self, interface: str) -> str:
+        """Get the robot's hostname."""
+        if self._parsed_args.robot_name:
+            return self._parsed_args.robot_name
 
-    def _adjust_calibration(
+        s = socket(AF_INET, SOCK_DGRAM)
+        info = ioctl(
+            s.fileno(),
+            0x8927,
+            pack('256s', bytes(interface, 'utf-8')[:15])
+        )
+
+        mac_address = ''
+        try:
+            for octet in info[18:24]:
+                mac_address += f'{octet:02x}'
+            robot_name = 'rq-' + mac_address[-4:]
+
+        except TypeError as e:
+            logging.warning(
+                '_get_robot_name:'
+                f' Excepted {e}'
+                f', info=<{info[18:24]}>'
+                f', octet=<{octet}>'
+                f', robot_name=<{robot_name}>'
+            )
+
+        return robot_name
+
+    def _retrieve_calibration_file(
          self,
+         calibration_file_path: str,
+         camera_name: str,
          resolution: str,
-         camera_name: str):
-        """Adjust the calibration file.
-
-        The calibration yaml file is NOT expected to be a complete
-        ROS parameter file. It's missing the /** and ros__parameters
-        keys.
-
-        Find the ov5647 calibration file in CALIBRATION_DIR.
-        Parse its YAML contents, update them, write them back
-        to the file. Then rename the file with the new resolution.
-        """
-        calibration_glob = (
-            CALIBRATION_DIR +
-            '/ov5647__*' +
-            self._old_resolution +
-            '.yaml'
+         robot_name: str):
+        """Retrieve and install a calibration file."""
+        calibration_file_url = (
+            CALIBRATION_URL_BASE
+            + robot_name
+            + '_ov5647_'
+            + resolution
+            + '.yaml'
         )
-        calibration_file = glob(calibration_glob)
-        if not calibration_file:
-            logging.error(
-                '_adjust_calibration:'
-                ' No calibration file found with'
-                f' {calibration_glob}'
-            )
-            logging.error(
-                'See'
-                ' https://github.com/billmania/roboquest_addons/wiki'
-                '/Calibrate-CSI-camera-for-APRIL-tags'
-            )
-            sys_exit(1)
-
-        calibration_file = calibration_file[0]
         logging.debug(
-            '_adjust_calibration:'
-            f' Calibration file: {calibration_file}'
+            '_retrieve_calibration_file:'
+            f' Retrieving {calibration_file_url}'
         )
+        try:
+            with urlopen(calibration_file_url) as f:
+                calibration_file_content = f.read().decode('utf-8')
 
-        with open(calibration_file, 'r') as f:
-            params = safe_load(f)
+        except Exception:
+            logging.warning(
+                '_retrieve_calibration_file:'
+                f' {calibration_file_url} not found'
+            )
 
-        params['image_height'] = (
-            int(RESOLUTIONS[resolution].split('x')[1])
+            logging.warning(
+                '_retrieve_calibration_file:'
+                ' Retrieving default calibration file.'
+            )
+            calibration_file_url = (
+                CALIBRATION_URL_BASE
+                + DEFAULT_CALIBRATION_ROBOT
+                + '_ov5647_'
+                + resolution
+                + '.yaml'
+            )
+            with urlopen(calibration_file_url) as f:
+                calibration_file_content = f.read().decode('ascii')
+
+        finally:
+            with open(calibration_file_path, 'w', encoding='ascii') as f:
+                f.write(calibration_file_content)
+
+    def _check_calibration_files(
+         self,
+         camera_name: str,
+         robot_name: str):
+        """Ensure calibration file exists.
+
+        Ensure a calibration file, for the robot's camera and the selected
+        resolution exists in the filesystem. If the required isn't present,
+        attempt to retrieve it.
+        """
+        resolution = (
+            self._old_resolution
+            if self._parsed_args.resolution is None
+            else RESOLUTIONS[self._parsed_args.resolution]
         )
-        params['image_width'] = (
-            int(RESOLUTIONS[resolution].split('x')[0])
-        )
-        params['camera_name'] = camera_name
-
-        with open(calibration_file, 'w') as f:
-            dump(params, f)
-
-#         logging.debug(
-#             '_adjust_calibration'
-#             f' {dump(params)}'
-#         )
-
-        new_calibration_file = (
+        calibration_file_glob = (
             CALIBRATION_DIR +
             '/' +
             camera_name +
+            resolution +
             '.yaml'
         )
-        Path(calibration_file).rename(new_calibration_file)
-
         logging.debug(
-            '_adjust_calibration:'
-            f' Renamed {calibration_file}'
-            f' to {new_calibration_file}'
+            '_check_calibration_files:'
+            f' Checking for {calibration_file_glob}'
+        )
+        calibration_file = glob(calibration_file_glob)
+        if calibration_file:
+            logging.info(
+                '_check_calibration_files:'
+                ' Calibration file already exists.'
+            )
+            return
+
+        self._retrieve_calibration_file(
+            calibration_file_glob,
+            camera_name,
+            resolution,
+            robot_name
         )
 
     def main(self):
@@ -251,15 +336,23 @@ class CamTool(object):
 
         self._parsed_args = self._parse_args()
 
-        camera_name = self._form_camera_name(
-            self._parsed_args.resolution
+        robot_name = self._get_robot_name(INTERFACE)
+        logging.debug(
+            'main:'
+            f' robot_name: {robot_name}'
         )
 
-        self._adjust_params(self._parsed_args.resolution)
+        self._get_camera_parameters()
+        camera_name = self._get_camera_name()
 
-        self._adjust_calibration(
-            self._parsed_args.resolution,
-            camera_name
+        if (
+             self._parsed_args.resolution is not None
+             or self._parsed_args.frame_rate is not None):
+            self._adjust_params()
+
+        self._check_calibration_files(
+            camera_name,
+            robot_name
         )
 
         logging.debug(
