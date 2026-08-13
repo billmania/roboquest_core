@@ -116,10 +116,22 @@ class RQHAT(object):
                  parity: str,
                  stop_bits: int,
                  read_timeout_sec: float,
-                 serial_errors_cb: Callable = None):
+                 serial_errors_cb: Callable = None,
+                 status_only: bool = False):
         """Initialize the HAT."""
         self._serial_errors_cb = serial_errors_cb
 
+        #
+        # self._status_only indicates the caller of __init__() will use
+        # only:
+        #  control_comms()
+        #  close()
+        #  status_msg()
+        #  show_status_msgs()
+        # Because of that limited use, most of the GPIO pin configuration
+        # is skipped.
+        #
+        self._status_only = status_only
         self._hat = None
         self._controls_state = {
             'charger': 'UNKNOWN',
@@ -172,8 +184,10 @@ class RQHAT(object):
             self._hat.reset_input_buffer()
             self._hat.reset_output_buffer()
 
-        except serial.SerialException:
-            self._hat = None
+        except serial.SerialException as e:
+            raise Exception(
+                f'Failed to setup {port}: {e}'
+            )
 
     def write_sentence(self, sentence: str) -> None:
         """Encode from ASCII and then write the sentence."""
@@ -217,15 +231,16 @@ class RQHAT(object):
 
     def cleanup_gpio(self):
         """Close the GPIO device."""
-        if self._controls_state['charger'] == 'ENABLED':
-            GPIO.output(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.HIGH)
-            self._controls_state['charger'] = 'DISABLED'
+        if not self._status_only:
+            if self._controls_state['charger'] == 'ENABLED':
+                GPIO.output(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.HIGH)
+                self._controls_state['charger'] = 'DISABLED'
 
-        if self._controls_state['fet_1'] == 'ENABLED':
-            GPIO.output(HAT_GPIO_PIN.FET_1_ENABLE.value, GPIO.LOW)
+            if self._controls_state['fet_1'] == 'ENABLED':
+                GPIO.output(HAT_GPIO_PIN.FET_1_ENABLE.value, GPIO.LOW)
 
-        if self._controls_state['fet_2'] == 'ENABLED':
-            GPIO.output(HAT_GPIO_PIN.FET_2_ENABLE.value, GPIO.LOW)
+            if self._controls_state['fet_2'] == 'ENABLED':
+                GPIO.output(HAT_GPIO_PIN.FET_2_ENABLE.value, GPIO.LOW)
 
         if self._controls_state['comms'] == 'ENABLED':
             GPIO.output(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.LOW)
@@ -249,31 +264,39 @@ class RQHAT(object):
         GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
 
-        #
-        # Subsequent control of the battery charger should use
-        # charger_control().
-        #
-        GPIO.setup(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.OUT)
-        GPIO.output(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.LOW)
-        self._controls_state['charger'] = 'ENABLED'
+        if not self._status_only:
+            #
+            # Subsequent control of the battery charger should use
+            # charger_control().
+            #
+            GPIO.setup(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.OUT)
+            GPIO.output(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.LOW)
+            self._controls_state['charger'] = 'ENABLED'
 
-        GPIO.setup(HAT_GPIO_PIN.FET_1_ENABLE.value, GPIO.OUT)
-        GPIO.output(HAT_GPIO_PIN.FET_1_ENABLE.value, GPIO.LOW)
-        self._controls_state['fet_1'] = 'DISABLED'
+            GPIO.setup(HAT_GPIO_PIN.FET_1_ENABLE.value, GPIO.OUT)
+            GPIO.output(HAT_GPIO_PIN.FET_1_ENABLE.value, GPIO.LOW)
+            self._controls_state['fet_1'] = 'DISABLED'
 
-        GPIO.setup(HAT_GPIO_PIN.FET_2_ENABLE.value, GPIO.OUT)
-        GPIO.output(HAT_GPIO_PIN.FET_2_ENABLE.value, GPIO.LOW)
-        self._controls_state['fet_2'] = 'DISABLED'
+            GPIO.setup(HAT_GPIO_PIN.FET_2_ENABLE.value, GPIO.OUT)
+            GPIO.output(HAT_GPIO_PIN.FET_2_ENABLE.value, GPIO.LOW)
+            self._controls_state['fet_2'] = 'DISABLED'
+
+            GPIO.setup(HAT_GPIO_PIN.CHARGER_POWERED.value, GPIO.IN)
 
         #
         # Subsequent control of the communications channel should use
         # control_comms().
         #
-        GPIO.setup(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.OUT)
-        GPIO.output(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.LOW)
-        self._controls_state['comms'] = 'DISABLED'
+        try:
+            GPIO.setup(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.OUT)
+            GPIO.output(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.LOW)
+            self._controls_state['comms'] = 'DISABLED'
 
-        GPIO.setup(HAT_GPIO_PIN.CHARGER_POWERED.value, GPIO.IN)
+        except Exception as e:
+            raise Exception(
+                'Exception configuring COMMS ENABLE pin'
+                f' GPIO.VERSION {GPIO.VERSION}: {e}'
+            )
 
     def charger_state(self) -> Tuple[bool, bool]:
         """Return charger state.
@@ -282,6 +305,9 @@ class RQHAT(object):
             - the battery is being charged
             - the charger has power
         """
+        if self._status_only:
+            raise Exception('Status only')
+
         power_pin = GPIO.input(HAT_GPIO_PIN.CHARGER_POWERED.value)
         charger_has_power = True if power_pin == GPIO.HIGH else False
 
@@ -299,6 +325,9 @@ class RQHAT(object):
 
     def charger_control(self, on: bool = False) -> None:
         """Control the charger."""
+        if self._status_only:
+            raise Exception('Status only')
+
         new_state = 'ENABLED' if on else 'DISABLED'
         if self._controls_state['charger'] != new_state:
             #
@@ -310,6 +339,9 @@ class RQHAT(object):
 
     def fet1_control(self, on: bool = False) -> None:
         """Control FET 1."""
+        if self._status_only:
+            raise Exception('Status only')
+
         new_state = 'ENABLED' if on else 'DISABLED'
         if self._controls_state['fet_1'] != new_state:
             new_pin_output = GPIO.HIGH if on else GPIO.LOW
@@ -318,6 +350,9 @@ class RQHAT(object):
 
     def fet2_control(self, on: bool = False) -> None:
         """Control FET 2."""
+        if self._status_only:
+            raise Exception('Status only')
+
         new_state = 'ENABLED' if on else 'DISABLED'
         if self._controls_state['fet_2'] != new_state:
             new_pin_output = GPIO.HIGH if on else GPIO.LOW

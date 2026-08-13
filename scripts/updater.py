@@ -36,6 +36,7 @@ from requests.exceptions import ConnectionError as GetConnectionError
 
 from rq_hat import RQHAT
 
+# VERSION = '22rc1'
 VERSION = '21'
 HAT_SERIAL = '/dev/ttyAMA1'
 SHUTDOWN_PIN = 27
@@ -486,14 +487,26 @@ class RQUpdate(object):
         to the HAT must be destroyed before the containers are started,
         to prevent conflict with the containers.
         """
-        self._hat = RQHAT(
-            HAT_SERIAL,
-            38400,
-            7,
-            'N',
-            1,
-            1.0)
-        self._hat.control_comms(enable=False)
+        try:
+            self._hat = RQHAT(
+                HAT_SERIAL,
+                38400,
+                7,
+                'N',
+                1,
+                1.0,
+                True
+            )
+
+        except Exception as e:
+            logging.warning(
+                'Exception during HAT setup'
+                f': {e}'
+            )
+            self._hat = None
+
+        if self._hat:
+            self._hat.control_comms(enable=False)
 
     def _close_hat(self):
         """Close the HAT connection.
@@ -501,7 +514,8 @@ class RQUpdate(object):
         Completely reset and shutdown the serial port and the GPIO
         sub-system.
         """
-        self._hat.close()
+        if self._hat:
+            self._hat.close()
 
     def _status_msg(self, msg: str = None) -> None:
         """
@@ -531,12 +545,13 @@ class RQUpdate(object):
         # means to persist previous updater.py status lines and to
         # refresh the display without adding another line.
         #
-        self._hat._status_lines = self._status_messages
-        if msg is not None:
-            self._hat.status_msg(msg)
-            self._status_messages = self._hat._status_lines
-        else:
-            self._hat.show_status_msgs()
+        if self._hat:
+            self._hat._status_lines = self._status_messages
+            if msg is not None:
+                self._hat.status_msg(msg)
+                self._status_messages = self._hat._status_lines
+            else:
+                self._hat.show_status_msgs()
 
     def stop_containers(self):
         """Kill any running containers."""
