@@ -64,9 +64,27 @@ def set_pin(pin_name: RQ_GPIO = None, pin_state: str = None) -> str:
     return pin_state
 
 
-def get_pin(pin: RQ_GPIO = None) -> str:
+def get_pin(pin_name: RQ_GPIO = None) -> str:
     """Read the state of a pin."""
-    return 'Not implemented'
+    if pin_name:
+        pin = pin_name.value
+    else:
+        return None
+
+    with gpiod.request_lines(
+        GPIO_DEVICE,
+        consumer='rq_gpio_utils',
+        config={
+            pin: gpiod.LineSettings(
+                direction=Direction.INPUT
+            )
+        },
+    ) as request:
+        return (
+            'high'
+            if request.get_value(pin) == Value.ACTIVE
+            else 'low'
+        )
 
 
 def detect_change(pin: RQ_GPIO = None, change: str = None):
