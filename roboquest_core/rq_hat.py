@@ -2,11 +2,11 @@
 from enum import Enum
 from typing import Callable, Tuple
 
-import RPi.GPIO as GPIO
+from rq_gpio_utils import RQ_GPIO, get_pin, set_pin
 
 import serial
 
-VERSION = 2
+VERSION = 3
 
 READ_EOL = b'\r\n'
 READ_TIMEOUT_SEC = 0.2
@@ -26,16 +26,6 @@ EOL = '\n'
 EOB = '\r'
 DISPLAY_LENGTH = (LINE_LENGTH * LINES) - len(EOB)
 COLUMNS = LINE_LENGTH - len(EOL)
-
-
-class HAT_GPIO_PIN(Enum):
-    """Pins for controlling features of the HAT."""
-
-    COMMS_ENABLE = 22
-    FET_1_ENABLE = 24
-    FET_2_ENABLE = 25
-    CHARGE_BATTERY = 21
-    CHARGER_POWERED = 7
 
 
 class HAT_SCREEN(Enum):
@@ -154,11 +144,9 @@ class RQHAT(object):
     def close(self):
         """Close the serial port.
 
-        Close the serial port and cleanup the GPIO. This method is not intended
-        for internal use.
+        Close the communication with the HAT.
         """
         self._hat.close()
-        GPIO.cleanup()
 
     def _open_hat_serial(self, port: str,
                          data_rate: int,
@@ -229,24 +217,6 @@ class RQHAT(object):
 
         return None
 
-    def cleanup_gpio(self):
-        """Close the GPIO device."""
-        if not self._status_only:
-            if self._controls_state['charger'] == 'ENABLED':
-                GPIO.output(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.HIGH)
-                self._controls_state['charger'] = 'DISABLED'
-
-            if self._controls_state['fet_1'] == 'ENABLED':
-                GPIO.output(HAT_GPIO_PIN.FET_1_ENABLE.value, GPIO.LOW)
-
-            if self._controls_state['fet_2'] == 'ENABLED':
-                GPIO.output(HAT_GPIO_PIN.FET_2_ENABLE.value, GPIO.LOW)
-
-        if self._controls_state['comms'] == 'ENABLED':
-            GPIO.output(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.LOW)
-
-        GPIO.cleanup()
-
     def control_comms(self, enable: bool = False):
         """Enable and disable comms.
 
@@ -255,47 +225,38 @@ class RQHAT(object):
         """
         new_state = 'ENABLED' if enable else 'DISABLED'
         if self._controls_state['comms'] != new_state:
-            new_pin_output = GPIO.HIGH if enable else GPIO.LOW
-            GPIO.output(HAT_GPIO_PIN.COMMS_ENABLE.value, new_pin_output)
+            new_pin_output = 'high' if enable else 'low'
+            set_pin(RQ_GPIO['COMMS_ENABLE'], new_pin_output)
             if new_state == 'DISABLED':
                 self._hat.reset_input_buffer()
 
     def _setup_gpio(self):
-        GPIO.setwarnings(False)
-        GPIO.setmode(GPIO.BCM)
-
         if not self._status_only:
             #
-            # Subsequent control of the battery charger should use
-            # charger_control().
+            # Subsequent control of these pins should use the dedicated
+            # method.
             #
-            GPIO.setup(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.OUT)
-            GPIO.output(HAT_GPIO_PIN.CHARGE_BATTERY.value, GPIO.LOW)
+            set_pin(RQ_GPIO['CHARGE_BATTERY'], 'low')
             self._controls_state['charger'] = 'ENABLED'
 
-            GPIO.setup(HAT_GPIO_PIN.FET_1_ENABLE.value, GPIO.OUT)
-            GPIO.output(HAT_GPIO_PIN.FET_1_ENABLE.value, GPIO.LOW)
+            set_pin(RQ_GPIO['FET_1_ENABLE'], 'low')
             self._controls_state['fet_1'] = 'DISABLED'
 
-            GPIO.setup(HAT_GPIO_PIN.FET_2_ENABLE.value, GPIO.OUT)
-            GPIO.output(HAT_GPIO_PIN.FET_2_ENABLE.value, GPIO.LOW)
+            set_pin(RQ_GPIO['FET_2_ENABLE'], 'low')
             self._controls_state['fet_2'] = 'DISABLED'
-
-            GPIO.setup(HAT_GPIO_PIN.CHARGER_POWERED.value, GPIO.IN)
 
         #
         # Subsequent control of the communications channel should use
         # control_comms().
         #
         try:
-            GPIO.setup(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.OUT)
-            GPIO.output(HAT_GPIO_PIN.COMMS_ENABLE.value, GPIO.LOW)
+            set_pin(RQ_GPIO['COMMS_ENABLE'], 'low')
             self._controls_state['comms'] = 'DISABLED'
 
         except Exception as e:
             raise Exception(
                 'Exception configuring COMMS ENABLE pin'
-                f' GPIO.VERSION {GPIO.VERSION}: {e}'
+                f' {e}'
             )
 
     def charger_state(self) -> Tuple[bool, bool]:
@@ -308,8 +269,8 @@ class RQHAT(object):
         if self._status_only:
             raise Exception('Status only')
 
-        power_pin = GPIO.input(HAT_GPIO_PIN.CHARGER_POWERED.value)
-        charger_has_power = True if power_pin == GPIO.HIGH else False
+        power_pin = get_pin(RQ_GPIO['CHARGER_POWERED'])
+        charger_has_power = True if power_pin == 'high' else False
 
         if not charger_has_power:
             #
@@ -333,8 +294,8 @@ class RQHAT(object):
             #
             # This pin is non-standard. Setting it LOW enables the charger.
             #
-            new_pin_output = GPIO.LOW if on else GPIO.HIGH
-            GPIO.output(HAT_GPIO_PIN.CHARGE_BATTERY.value, new_pin_output)
+            new_pin_output = 'low' if on else 'high'
+            set_pin(RQ_GPIO['CHARGE_BATTERY'], new_pin_output)
             self._controls_state['charger'] = new_state
 
     def fet1_control(self, on: bool = False) -> None:
@@ -344,8 +305,8 @@ class RQHAT(object):
 
         new_state = 'ENABLED' if on else 'DISABLED'
         if self._controls_state['fet_1'] != new_state:
-            new_pin_output = GPIO.HIGH if on else GPIO.LOW
-            GPIO.output(HAT_GPIO_PIN.FET_1_ENABLE.value, new_pin_output)
+            new_pin_output = 'high' if on else 'low'
+            set_pin(RQ_GPIO['FET_1_ENABLE'], new_pin_output)
             self._controls_state['fet_1'] = new_state
 
     def fet2_control(self, on: bool = False) -> None:
@@ -355,8 +316,8 @@ class RQHAT(object):
 
         new_state = 'ENABLED' if on else 'DISABLED'
         if self._controls_state['fet_2'] != new_state:
-            new_pin_output = GPIO.HIGH if on else GPIO.LOW
-            GPIO.output(HAT_GPIO_PIN.FET_2_ENABLE.value, new_pin_output)
+            new_pin_output = 'high' if on else 'low'
+            set_pin(RQ_GPIO['FET_2_ENABLE'], new_pin_output)
             self._controls_state['fet_2'] = new_state
 
     def status_msg(self, message: str) -> None:

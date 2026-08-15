@@ -16,6 +16,7 @@ from gpiod.line import Bias, Direction, Edge, Value
 
 
 GPIO_DEVICE = '/dev/gpiochip0'
+VERSION = 1
 
 detector = None
 
