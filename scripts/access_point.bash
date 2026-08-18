@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 #
-# Bill Mania, 24 Jan 2022
-#
 # Executed at boot to ensure there is an Access Point setup to
 # allow wireless access to the robot. If the AP connection
 # doesn't exist, it is created. If it does exist, its SSID
 # definition is updated to match the current hardware.
 #
+# In order to not require hosting a DHCP server on the robot,
+# an address is statically assigned to the robot. The requirements
+# for the host computer are in
+# https://github.com/billmania/roboquest_core/wiki/Robot-WiFi-Access-Point
+#
 
 NM_CONN_NAME="roboAP"
 AP_SSID_BASE="roboAP"
 AP_PSK="roboquest"
+AP_IP="192.168.193.1/24"
 
 #
 # In order to create a unique Access Point number, append
@@ -39,13 +43,12 @@ then
         conn modify $NM_CONN_NAME \
         802-11-wireless.mode ap \
         802-11-wireless.band bg \
-        ipv4.method shared
-    nmcli -c no \
-        conn modify $NM_CONN_NAME \
-        wifi-sec.key-mgmt wpa-psk
-    nmcli -c no \
-        conn modify $NM_CONN_NAME \
-        wifi-sec.psk $AP_PSK
+        802-11-wireless.channel 6 \
+        802-11-wireless-security.key-mgmt wpa-psk \
+        802-11-wireless-security.psk "$AP_PSK" \
+        ipv4.addresses "$AP_IP" \
+        ipv4.method manual \
+        ipv6.method disabled
 else
     logger -p user.notice  "Access Point ${NM_CONN_NAME} exists"
     ssid=$(nmcli -c no -t --fields 802-11-wireless.ssid conn show ${NM_CONN_NAME} \
