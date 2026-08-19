@@ -27,18 +27,18 @@ from socket import AF_INET, SOCK_DGRAM, socket
 from sys import exit
 from time import sleep
 
-import RPi.GPIO as GPIO
-
 import docker
 
 from requests import get
 from requests.exceptions import ConnectionError as GetConnectionError
 
+from rq_gpio_utils import GPIOEdgeDetector, RQ_GPIO
+
 from rq_hat import RQHAT
 
+# VERSION = '22rc1'
 VERSION = '21'
-HAT_SERIAL = '/dev/ttyAMA1'
-SHUTDOWN_PIN = 27
+HAT_SERIAL = '/dev/ttyAMA3'
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
 RQ_CORE_PERSIST = (
     '/usr/src/ros2ws/install/roboquest_core/share/roboquest_core/persist'
@@ -87,7 +87,7 @@ CONTAINERS = {
         'devices': ['/dev/gpiomem:/dev/gpiomem:rwm',
                     '/dev/i2c-1:/dev/i2c-1:rwm',
                     '/dev/i2c-6:/dev/i2c-6:rwm',
-                    HAT_SERIAL+':'+HAT_SERIAL+':rwm'],
+                    HAT_SERIAL+':/dev/ttyAMA1:rwm'],
         'volumes': ['/dev/shm:/dev/shm',
                     '/var/run/dbus:/var/run/dbus',
                     '/run/udev:/run/udev:ro',
@@ -116,10 +116,6 @@ class RQUpdate(object):
             format='%(asctime)s %(levelname)s %(message)s',
             level=logging.INFO)
         logging.info(f'updater.py version {VERSION} started')
-
-        signal(SIGHUP, self.shutdown)
-        signal(SIGINT, self.shutdown)
-        signal(SIGTERM, self.shutdown)
 
         #
         # A safety flag, to ensure the HAT serial port isn't touched
@@ -287,12 +283,16 @@ class RQUpdate(object):
         Setup the callback to call when the shutdown hardware
         signal is detected.
         """
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(SHUTDOWN_PIN, GPIO.IN)
-        GPIO.add_event_detect(
-            SHUTDOWN_PIN,
-            GPIO.RISING
+        self._shutdown_detector = GPIOEdgeDetector(
+            RQ_GPIO['SHUTDOWN'],
+            self.shutdown,
+            debounce_us=1000
         )
+        self._shutdown_detector.start()
+
+        signal(SIGHUP, self.shutdown)
+        signal(SIGINT, self.shutdown)
+        signal(SIGTERM, self.shutdown)
 
     def _setup_docker(self):
         """Create the docker client."""
@@ -486,14 +486,26 @@ class RQUpdate(object):
         to the HAT must be destroyed before the containers are started,
         to prevent conflict with the containers.
         """
-        self._hat = RQHAT(
-            HAT_SERIAL,
-            38400,
-            7,
-            'N',
-            1,
-            1.0)
-        self._hat.control_comms(enable=False)
+        try:
+            self._hat = RQHAT(
+                HAT_SERIAL,
+                38400,
+                7,
+                'N',
+                1,
+                1.0,
+                True
+            )
+
+        except Exception as e:
+            logging.warning(
+                'Exception during HAT setup'
+                f': {e}'
+            )
+            self._hat = None
+
+        if self._hat:
+            self._hat.control_comms(enable=False)
 
     def _close_hat(self):
         """Close the HAT connection.
@@ -501,7 +513,8 @@ class RQUpdate(object):
         Completely reset and shutdown the serial port and the GPIO
         sub-system.
         """
-        self._hat.close()
+        if self._hat:
+            self._hat.close()
 
     def _status_msg(self, msg: str = None) -> None:
         """
@@ -531,12 +544,13 @@ class RQUpdate(object):
         # means to persist previous updater.py status lines and to
         # refresh the display without adding another line.
         #
-        self._hat._status_lines = self._status_messages
-        if msg is not None:
-            self._hat.status_msg(msg)
-            self._status_messages = self._hat._status_lines
-        else:
-            self._hat.show_status_msgs()
+        if self._hat:
+            self._hat._status_lines = self._status_messages
+            if msg is not None:
+                self._hat.status_msg(msg)
+                self._status_messages = self._hat._status_lines
+            else:
+                self._hat.show_status_msgs()
 
     def stop_containers(self):
         """Kill any running containers."""
@@ -1028,13 +1042,6 @@ class RQUpdate(object):
         self._status_msg('starting RoboQuest')
         self._setup_shutdown()
         while True:
-            try:
-                if GPIO.event_detected(SHUTDOWN_PIN):
-                    self._shutdown_cb('BUTTON')
-
-            except RuntimeError:
-                self._setup_shutdown()
-
             self._check_configs(restore=False)
             self._check_running_containers()
 
@@ -1043,6 +1050,11 @@ class RQUpdate(object):
                 self._process_message(message)
             else:
                 sleep(LOOP_PERIOD_S)
+
+    def _gpio_shutdown(self, event) -> None:
+        """Handle the GPIO shutdown signal."""
+        self._shutdown_detector.done = True
+        self._shutdown_cb(arg='BUTTON')
 
     def _shutdown_cb(self, arg='UNKNOWN'):
         """
@@ -1053,8 +1065,9 @@ class RQUpdate(object):
         """
         if arg == 'SHUTDOWN':
             logging.warning('Shutdown triggered by UI')
-        elif type(arg) is int:
+        elif arg == 'BUTTON':
             logging.warning('Shutdown button pressed')
+            self._shutdown_detector.stop()
         else:
             logging.warning(f'Shutdown by {arg}')
 
