@@ -31,6 +31,36 @@
       }
     },
     {
+      "source": "rq_hat.py",
+      "md5sum": "ead9fec54aa0e7f43e34dd6cb3c8f83f",
+      "details": {
+        "full_path": "/usr/local/bin/rq_hat.py",
+        "owner": "root",
+        "group": "root",
+        "mode": 360
+      }
+    },
+    {
+      "source": "rq_gpio_utils.py",
+      "md5sum": "8b3f00bbe86faf4faa2c8a1893f0e6de",
+      "details": {
+        "full_path": "/usr/local/bin/rq_gpio_utils.py",
+        "owner": "root",
+        "group": "root",
+        "mode": 360
+      }
+    },
+    {
+      "source": "access_point.bash",
+      "md5sum": "ac9864d66c892003c3d61d708557f7f5",
+      "details": {
+        "full_path": "/usr/local/roboquest/access_point.bash",
+        "owner": "root",
+        "group": "root",
+        "mode": 360
+      }
+    },
+    {
       "source": "backup.sh",
       "md5sum": "48824a0bd38bce720d6c6188d85d7f32",
       "details": {
