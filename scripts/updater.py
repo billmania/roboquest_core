@@ -36,8 +36,7 @@ from rq_gpio_utils import GPIOEdgeDetector, RQ_GPIO
 
 from rq_hat import RQHAT
 
-# VERSION = '22rc1'
-VERSION = '21'
+VERSION = '22'
 HAT_SERIAL = '/dev/ttyAMA3'
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
 RQ_CORE_PERSIST = (
@@ -239,7 +238,7 @@ class RQUpdate(object):
                     f'Failed to stop previous log server {log_server_pid}'
                 )
             Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
-            self._reboot_cb('_start_log_server')
+            self._reboot('_start_log_server')
 
         log_server = Process(
             target=log_server_task,
@@ -276,23 +275,25 @@ class RQUpdate(object):
 
         return
 
-    def _setup_shutdown(self):
+    def _setup_shutdown(self) -> None:
         """
         setup_shutdown.
 
-        Setup the callback to call when the shutdown hardware
-        signal is detected.
+        Setup to catch several shutdown commands:
+            1. OS signal from the command line
+            2. GPIO signal from the HAT button
+            3. OS signal from systemctl
         """
         self._shutdown_detector = GPIOEdgeDetector(
             RQ_GPIO['SHUTDOWN'],
-            self.shutdown,
+            self._button_shutdown_cb,
             debounce_us=1000
         )
         self._shutdown_detector.start()
 
-        signal(SIGHUP, self.shutdown)
-        signal(SIGINT, self.shutdown)
-        signal(SIGTERM, self.shutdown)
+        signal(SIGHUP, self._signal_shutdown_cb)
+        signal(SIGINT, self._signal_shutdown_cb)
+        signal(SIGTERM, self._signal_shutdown_cb)
 
     def _setup_docker(self):
         """Create the docker client."""
@@ -327,7 +328,7 @@ class RQUpdate(object):
         Path(self._fifo_path).unlink(missing_ok=True)
         self._fifo = None
 
-    def read_message(self) -> str:
+    def _read_message(self) -> str:
         """Read a message, if available, and then return it."""
         if not self._messages:
             for message in self._fifo.readline().split(EOL):
@@ -469,7 +470,7 @@ class RQUpdate(object):
                 f" {self._all_versions['latest']['updater']}"
             )
             logging.warning('updater.py exiting without reboot')
-            self.stop_containers()
+            self._stop_containers()
             self._status_msg('updater.py exiting')
             self._set_update_in_progress()
 
@@ -533,8 +534,6 @@ class RQUpdate(object):
         the status display.
         """
         if self._containers_running:
-            if msg:
-                logging.warning(f'HAT UI not available for: {msg}')
             return
 
         #
@@ -552,7 +551,7 @@ class RQUpdate(object):
             else:
                 self._hat.show_status_msgs()
 
-    def stop_containers(self):
+    def _stop_containers(self):
         """Kill any running containers."""
         logging.info('Stopping containers')
         for container_name in CONTAINERS:
@@ -579,7 +578,7 @@ class RQUpdate(object):
         Docker doesn't provide a mechanism to compare the version of a local
         image to the version on a registry.
         """
-        self.stop_containers()
+        self._stop_containers()
 
         for container_name in CONTAINERS:
             logging.info(f'checking {container_name}')
@@ -671,11 +670,11 @@ class RQUpdate(object):
         elif command['action'].upper() == 'SHUTDOWN':
             logging.info('SHUTDOWN command with args: <%s>', command['args'])
             self._status_msg('SHUTDOWN')
-            self._shutdown_cb('SHUTDOWN')
+            self._command_shutdown()
         elif command['action'].upper() == 'REBOOT':
             logging.info('REBOOT command with args: <%s>', command['args'])
             self._status_msg('REBOOT')
-            self._reboot_cb('REBOOT')
+            self._reboot('REBOOT')
         else:
             logging.warning('Unrecognized command message: %s', message)
 
@@ -1045,45 +1044,36 @@ class RQUpdate(object):
             self._check_configs(restore=False)
             self._check_running_containers()
 
-            message = self.read_message()
+            message = self._read_message()
             if message:
                 self._process_message(message)
             else:
                 sleep(LOOP_PERIOD_S)
 
-    def _gpio_shutdown(self, event) -> None:
-        """Handle the GPIO shutdown signal."""
-        self._shutdown_detector.done = True
-        self._shutdown_cb(arg='BUTTON')
+    def _signal_shutdown_cb(self, signal: int) -> None:
+        """Shutdown the robot by OS signal.
 
-    def _shutdown_cb(self, arg='UNKNOWN'):
+        The signal can come from the command line or from
+        systemctl. In either case, some other process is
+        responsible for the actual shutdown of the OS.
         """
-        Shutdown the robot.
+        logging.info(f'Shutdown by signal {signal}')
+        self._shutdown_cleanup(with_halt=False)
 
-        Called when the shutdown control signal has been detected and
-        when the SHUTDOWN command is received.
-        """
-        if arg == 'SHUTDOWN':
-            logging.warning('Shutdown triggered by UI')
-        elif arg == 'BUTTON':
-            logging.warning('Shutdown button pressed')
-            self._shutdown_detector.stop()
-        else:
-            logging.warning(f'Shutdown by {arg}')
+    def _button_shutdown_cb(self, gpio_event) -> None:
+        """Shutdown the robot by HAT button."""
+        logging.info('Shutdown by HAT button')
+        self._shutdown_cleanup(with_halt=True)
 
-        os.system('systemctl halt')
+    def _command_shutdown(self) -> None:
+        """Shutdown the robot by GUI command."""
+        logging.info('Shutdown by GUI command')
+        self._shutdown_cleanup(with_halt=True)
 
-        #
-        # Pause here, so updater.py doesn't try
-        # to restart the containers while systemd is
-        # stopping the docker daemon.
-        #
-        sleep(LONG_TIME)
-
-    def _reboot_cb(self, arg):
+    def _reboot(self, arg):
         """Reboot the robot."""
         logging.info(f'Reboot triggered by {arg}')
-        self.stop_containers()
+        self._stop_containers()
         self._status_msg('Reboot triggered')
         Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
         os.system('systemctl reboot')
@@ -1094,7 +1084,6 @@ class RQUpdate(object):
         # to stop the docker daemon.
         #
         sleep(LONG_TIME)
-        logging.warning('Woke unexpectedly from sleep')
 
     def _remove_old_images(self):
         """
@@ -1116,11 +1105,7 @@ class RQUpdate(object):
             except Exception as e:
                 logging.warning(f'Failed to remove old {image.id}: {e}')
 
-    def shutdown(
-        self,
-        signal_number=None,
-        stack_frame=None
-    ):
+    def _shutdown_cleanup(self, with_halt: bool = False) -> None:
         """Ready the updater to be shutdown.
 
         This method must complete quickly, because it could have been
@@ -1130,17 +1115,16 @@ class RQUpdate(object):
         signal(SIGINT, SIG_IGN)
         signal(SIGTERM, SIG_IGN)
 
-        if signal_number:
-            logging.info(f'Shutdown signal: {signal_number}')
-        else:
-            logging.info('Shutdown by user')
         logging.shutdown()
         self._close_fifo()
         Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
-        self.stop_containers()
+        self._stop_containers()
         self._status_msg('Shutdown')
 
-        exit(0)
+        if with_halt:
+            os.system('systemctl halt')
+
+        sleep(LONG_TIME)
 
 
 if __name__ == '__main__':
@@ -1148,4 +1132,3 @@ if __name__ == '__main__':
     rq_update = RQUpdate(UPDATE_FIFO)
 
     rq_update.run()
-    rq_update.shutdown()
