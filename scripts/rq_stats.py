@@ -194,7 +194,10 @@ class RQStats(object):
             for serial in robots:
                 f.write('<tr>')
                 f.write(f'<td>{serial}</td>')
-                f.write(f"<td>{robots[serial]['timestamp']}</td>")
+                isotime = datetime.fromtimestamp(
+                    robots[serial]['timestamp']
+                ).astimezone().isoformat()
+                f.write(f'<td>{isotime}')
                 f.write(f"<td>{robots[serial]['id']}</td>")
                 f.write(f"<td>{robots[serial]['updater']}</td>")
                 f.write(f"<td>{robots[serial]['core']}</td>")
