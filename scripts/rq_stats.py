@@ -19,9 +19,9 @@ from dateutil.tz import gettz
 from platformdirs import user_state_dir
 
 VERSION = '1'
-LOG_DIR = '/tmp/lighttpd'
+LOG_DIR = '/var/log/lighttpd'
 STATS_FILE = Path(user_state_dir('rq_stats')) / 'rq_stats.json'
-HTML_FILE = '/home/bill/Downloads/rq_stats.html'
+HTML_FILE = '/var/www/html/rq_stats.html'
 
 MONTHS = {
     'Jan': '01',
@@ -150,7 +150,7 @@ class RQStats(object):
         for log_file in self._logs_list:
             for log_entry in log_file.read_text().splitlines():
                 entry_timestamp = self._parse_timestamp(log_entry[1:27])
-                if entry_timestamp <= self._last_timestamp:
+                if entry_timestamp > self._last_timestamp:
                     if pattern.search(log_entry):
                         robot = self._parse_entry(log_entry)
                         if (
@@ -167,9 +167,6 @@ class RQStats(object):
                                 'core': robot['core'],
                                 'ui': robot['ui']
                             }
-            print(
-                f"robots: {self._stats['robots']}"
-            )
 
     def _save_stats(self) -> None:
         """Write the updated stats to the file."""
