@@ -21,6 +21,7 @@ from platformdirs import user_state_dir
 VERSION = '1'
 LOG_DIR = '/tmp/lighttpd'
 STATS_FILE = Path(user_state_dir('rq_stats')) / 'rq_stats.json'
+HTML_FILE = '/home/bill/Downloads/rq_stats.html'
 
 MONTHS = {
     'Jan': '01',
@@ -181,6 +182,30 @@ class RQStats(object):
 
     def _write_html(self) -> None:
         """Write the updated stats to the HTML file."""
+        with open(HTML_FILE, 'w') as f:
+            f.write('<!DOCTYPE html><html><body>\n')
+            f.write('<table border=2><tr>\n')
+            f.write('<th>Serial</th>\n')
+            f.write('<th>Last seen</th>\n')
+            f.write('<th>ID</th>\n')
+            f.write('<th>updater</th>\n')
+            f.write('<th>rq_core</th>\n')
+            f.write('<th>rq_ui</th>\n')
+            f.write('</tr>\n')
+
+            robots = self._stats['robots']
+            for serial in robots:
+                f.write('<tr>')
+                f.write(f'<td>{serial}</td>')
+                f.write(f"<td>{robots[serial]['timestamp']}</td>")
+                f.write(f"<td>{robots[serial]['id']}</td>")
+                f.write(f"<td>{robots[serial]['updater']}</td>")
+                f.write(f"<td>{robots[serial]['core']}</td>")
+                f.write(f"<td>{robots[serial]['ui']}</td>")
+                f.write('</tr>\n')
+
+            f.write('</table></body></html>\n')
+
         return
 
     def run(self):
