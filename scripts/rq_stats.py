@@ -180,7 +180,13 @@ class RQStats(object):
     def _write_html(self) -> None:
         """Write the updated stats to the HTML file."""
         with open(HTML_FILE, 'w') as f:
-            f.write('<!DOCTYPE html><html><body>\n')
+            f.write('<!DOCTYPE html><html><head>')
+            f.write('<title>RQ robots status</title>')
+            f.write('</head>\n<body>\n')
+            isotime = datetime.fromtimestamp(
+                self._stats['last_timestamp']
+            ).astimezone().isoformat()
+            f.write(f'<h1>Status as of {isotime}</h1>')
             f.write('<table border=2><tr>\n')
             f.write('<th>Serial</th>\n')
             f.write('<th>Last seen</th>\n')
