@@ -2,7 +2,14 @@
 from enum import Enum
 from typing import Callable, Tuple
 
-from rq_gpio_utils import RQ_GPIO, get_pin, set_pin
+#
+# rq_hat is used by two separate applications:
+# updater.py and rq_core.
+#
+try:
+    from rq_gpio_utils import RQ_GPIO, get_pin, set_pin
+except ModuleNotFoundError:
+    from roboquest_core.rq_gpio_utils import RQ_GPIO, get_pin, set_pin
 
 import serial
 
