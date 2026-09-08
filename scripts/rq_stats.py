@@ -18,7 +18,7 @@ from dateutil.tz import gettz
 
 from platformdirs import user_state_dir
 
-VERSION = '1'
+VERSION = '2'
 LOG_DIR = '/var/log/lighttpd'
 STATS_FILE = Path(user_state_dir('rq_stats')) / 'rq_stats.json'
 HTML_FILE = '/var/www/html/rq_stats.html'
@@ -114,19 +114,10 @@ class RQStats(object):
     def _parse_entry(self, entry: str) -> dict:
         """Parse the log entry.
 
-        Extract:
-            serial
-            id
-            updater
-            core
-            ui
+        entry is expected to contain a query string. The first key must
+        be 'serial'.
 
-        and return those details as a dictionary.
-
-        An entry looks like:
-            [15/Aug/2026:07:32:26 -0700] 75.100.206.94 GET
-            /firmware_version.txt?serial=10000000179a7777&id=72&uptime=32.57&updater=21&core=25&ui=36
-            HTTP/1.1 200 "python-requests/2.32.3"
+        Return the key-values as a dictionary.
         """
         details_section = entry[
             entry.find('serial='): entry.find(' HTTP')
@@ -144,28 +135,57 @@ class RQStats(object):
         Update self._stats with details from newer log
         entries.
         """
-        pattern = compile('firmware.*ui=')
+        versions_re = compile('firmware.*ui=')
+        register_re = compile('register.*user=')
 
         robots = self._stats['robots']
         for log_file in self._logs_list:
             for log_entry in log_file.read_text().splitlines():
                 entry_timestamp = self._parse_timestamp(log_entry[1:27])
                 if entry_timestamp > self._last_timestamp:
-                    if pattern.search(log_entry):
-                        robot = self._parse_entry(log_entry)
+                    if versions_re.search(log_entry):
+                        versions = self._parse_entry(log_entry)
+                        if versions['serial'] in robots:
+                            user = robots[versions['serial']]['user']
+                        else:
+                            user = ''
+
                         if (
-                            robot['serial'] not in robots
+                            versions['serial'] not in robots
                             or (
-                                robots[robot['serial']]['timestamp']
+                                robots[versions['serial']]['timestamp']
                                 < entry_timestamp
                             )
                            ):
-                            robots[robot['serial']] = {
+                            robots[versions['serial']] = {
                                 'timestamp': entry_timestamp,
-                                'id': robot['id'],
-                                'updater': robot['updater'],
-                                'core': robot['core'],
-                                'ui': robot['ui']
+                                'user': user,
+                                'id': versions['id'],
+                                'updater': versions['updater'],
+                                'core': versions['core'],
+                                'ui': versions['ui']
+                            }
+
+                    if register_re.search(log_entry):
+                        registration = self._parse_entry(log_entry)
+                        if registration['serial'] not in robots:
+                            robots[registration['serial']] = {
+                                'timestamp': entry_timestamp,
+                                'user': registration['user'],
+                                'id': '',
+                                'updater': '',
+                                'core': '',
+                                'ui': ''
+                            }
+                        elif (
+                            robots[registration['serial']]['timestamp']
+                                < entry_timestamp
+                           ):
+                            robots[registration['serial']] = {
+                                'user': registration['user'],
+                            }
+                            robots[registration['serial']] = {
+                                'timestamp': entry_timestamp
                             }
 
     def _save_stats(self) -> None:
@@ -190,6 +210,7 @@ class RQStats(object):
             f.write('<table border=2><tr>\n')
             f.write('<th>Serial</th>\n')
             f.write('<th>Last seen</th>\n')
+            f.write('<th>User</th>\n')
             f.write('<th>ID</th>\n')
             f.write('<th>updater</th>\n')
             f.write('<th>rq_core</th>\n')
@@ -204,6 +225,7 @@ class RQStats(object):
                     robots[serial]['timestamp']
                 ).astimezone().isoformat()
                 f.write(f'<td>{isotime}')
+                f.write(f"<td>{robots[serial]['user']}</td>")
                 f.write(f"<td>{robots[serial]['id']}</td>")
                 f.write(f"<td>{robots[serial]['updater']}</td>")
                 f.write(f"<td>{robots[serial]['core']}</td>")
