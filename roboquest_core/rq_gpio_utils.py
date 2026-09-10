@@ -2,6 +2,8 @@
 
 Utility functions and constants for manipulating and
 monitoring GPIO pins.
+This modules subsumed the functionality of the rq_gpio_user.py
+module.
 """
 
 import threading
@@ -16,20 +18,46 @@ from gpiod.line import Bias, Direction, Edge, Value
 
 
 GPIO_DEVICE = '/dev/gpiochip0'
-VERSION = 1
+VERSION = 2
 
 detector = None
 
 
 class RQ_GPIO(Enum):
-    """Pins used by the Roboquest application."""
+    """Pins used by the Roboquest application.
+
+    Pin names beginning with a 'U' are directly accessible to the
+    user.
+    """
 
     COMMS_ENABLE = 'GPIO22'
     FET_1_ENABLE = 'GPIO24'
     FET_2_ENABLE = 'GPIO25'
     CHARGE_BATTERY = 'GPIO21'
     CHARGER_POWERED = 'GPIO7'
+    MOTOR_ENABLE = 'GPIO17'
+    SERVO_ENABLE = 'GPIO23'
     SHUTDOWN = 'GPIO27'
+    UGPIO6 = 'GPIO6'
+    UGPIO16 = 'GPIO16'
+    UGPIO19 = 'GPIO19'
+    UGPIO20 = 'GPIO20'
+    UGPIO26 = 'GPIO26'
+
+
+class USER_GPIO_PIN(Enum):
+    """GPIO pins available to the user.
+
+    The names of each member of the Enum match the attribute
+    names in the GPIOOutput and GPIOInput ROS interface names,
+    for historical reasons.
+    """
+
+    gpio6 = RQ_GPIO['UGPIO6']
+    gpio16 = RQ_GPIO['UGPIO16']
+    gpio19 = RQ_GPIO['UGPIO19']
+    gpio20 = RQ_GPIO['UGPIO20']
+    gpio26 = RQ_GPIO['UGPIO26']
 
 
 class GPIOEdgeDetector:

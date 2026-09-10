@@ -1,14 +1,12 @@
-"""Use the Raspberry Pi GPIO and I2C facilities to control the drive motors."""
+"""Use the gpiod and I2C facilities to control the drive motors."""
 
 from struct import pack
 from time import sleep
 
-import RPi.GPIO as GPIO
-
+from roboquest_core.rq_gpio_utils import RQ_GPIO, set_pin
 from roboquest_core.rq_i2c import BusError, DeviceError
 from roboquest_core.rq_i2c import RQI2CComms
 
-MOTOR_ENABLE_PIN = 17
 I2C_DEVICE_ID = 0x53
 
 I2C_MOTOR_LEFT_REGISTER = 3  # MOTOR1 connector
@@ -62,14 +60,8 @@ class RQMotors(object):
         self._motor_max_rpm = max_rpm
 
     def _setup_gpio(self) -> None:
-        """Initialize the GPIO subsystem.
-
-        This class does not have exclusive control of the GPIO sub-system.
-        """
-        GPIO.setwarnings(False)
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(MOTOR_ENABLE_PIN, GPIO.OUT)
-        GPIO.output(MOTOR_ENABLE_PIN, GPIO.LOW)
+        """Initialize the GPIO subsystem."""
+        set_pin(RQ_GPIO['MOTOR_ENABLE'], 'low')
         self._motors_enabled = False
 
     def _setup_i2c(self) -> None:
@@ -97,12 +89,12 @@ class RQMotors(object):
         It also resets the rpm for each motor to 0.
         """
         if (enable and not self._motors_enabled):
-            GPIO.output(MOTOR_ENABLE_PIN, GPIO.HIGH)
+            set_pin(RQ_GPIO['MOTOR_ENABLE'], 'high')
             sleep(0.2)
             self._motors_enabled = True
 
         if (not enable and self._motors_enabled):
-            GPIO.output(MOTOR_ENABLE_PIN, GPIO.LOW)
+            set_pin(RQ_GPIO['MOTOR_ENABLE'], 'low')
             self._motors_enabled = False
 
     def _pack_rpm(self, rpm: int) -> bytes:

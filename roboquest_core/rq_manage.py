@@ -20,7 +20,8 @@ from rclpy.parameter import Parameter
 
 from roboquest_core.rq_config_file import ConfigFile
 from roboquest_core.rq_drive_utilities import DriveUtils
-from roboquest_core.rq_gpio_user import PinError, USER_GPIO_PIN, UserGPIO
+from roboquest_core.rq_gpio_utils import USER_GPIO_PIN
+from roboquest_core.rq_gpio_utils import get_pin, set_pin
 from roboquest_core.rq_hat import HAT_BUTTON, HAT_SCREEN
 from roboquest_core.rq_hat import RQHAT
 from roboquest_core.rq_hat import SCREEN_HEADER, TELEM_HEADER
@@ -42,7 +43,7 @@ from rq_msgs.srv import Control
 
 from std_srvs.srv import Empty
 
-VERSION = '26rc1'
+VERSION = '26rc2'
 
 MODULE_DIR = (
     '/usr/src/ros2ws'
@@ -127,7 +128,7 @@ class RQManage(RQNode):
             self._parameters['sprocket_radius'],
             self._parameters['track_separation']
         )
-        self._gpio = UserGPIO()
+        self._gpio_input_pins = []
         self._i2c = RQI2CComms()
         self._i2c_support = I2CSupport()
         self._i2c_objects = self._i2c_support.import_modules(MODULE_DIR)
@@ -177,40 +178,16 @@ class RQManage(RQNode):
         idle. Use the _state parts to determine how to set each pin
         configured as an output.
         """
+        self._gpio_input_pins = []
         for gpio_pin in USER_GPIO_PIN:
             direction = getattr(msg, gpio_pin.name+'_direction')
-            if direction == GPIOOutput.INPUT:
-                try:
-                    self._gpio.make_input(gpio_pin)
-                except PinError:
-                    self.get_logger().warning(
-                        '_gpio_output_cb: make_input PinError'
-                    )
-            elif direction == GPIOOutput.OUTPUT:
-                try:
-                    self._gpio.make_output(gpio_pin)
-                except PinError:
-                    self.get_logger().warning(
-                        '_gpio_output_cb: make_output PinError'
-                    )
-
-                try:
-                    self._gpio.set_pin(
-                        gpio_pin,
-                        getattr(msg, gpio_pin.name+'_state')
-                    )
-                except PinError:
-                    self.get_logger().warning(
-                        '_gpio_output_cb: set_pin PinError'
-                    )
-
-            elif direction == GPIOOutput.UNUSED:
-                try:
-                    self._gpio.clear_pin(gpio_pin)
-                except PinError:
-                    self.get_logger().warning(
-                        '_gpio_output_cb: clear_pin PinError'
-                    )
+            if direction == GPIOOutput.OUTPUT:
+                set_pin(
+                    gpio_pin.value,
+                    str(getattr(msg, gpio_pin.name+'_state'))
+                )
+            elif direction == GPIOOutput.INPUT:
+                self._gpio_input_pins.append(gpio_pin.value)
 
     def _servo_cb(self, msg: Servos) -> None:
         """Handle a servo command.
@@ -435,27 +412,33 @@ class RQManage(RQNode):
         Read the current list of GPIO pins configured as input
         and publish a message with each pins current state.
         """
-        try:
-            input_pins = self._gpio.read_input_pins()
-        except PinError:
-            self.get_logger().warning(
-                '_publish_gpio: PinError for read_input_pins'
-            )
-            return
-
-        if not input_pins:
+        if not self._gpio_input_pins:
             return
 
         gpio_msg = GPIOInput()
         gpio_msg.header.stamp = self.get_clock().now().to_msg()
 
-        for gpio_pin in input_pins:
+        for gpio_pin in self._gpio_input_pins:
             self.get_logger().info(
                 '_publish_gpio:'
-                + f' {gpio_pin[0].name} = {gpio_pin[1]}',
-                throttle_duration_sec=5.0
+                f' Type: {type(gpio_pin)}'
+                f' Enum name: {gpio_pin.name}'
+                f' Enum value: {gpio_pin.value}'
             )
-            setattr(gpio_msg, gpio_pin[0].name, gpio_pin[1])
+            pin_value = (
+                GPIOInput.LOW
+                if get_pin(gpio_pin) == 'low'
+                else GPIOInput.HIGH
+            )
+            self.get_logger().info(
+                '_publish_gpio:'
+                f' pin value: {pin_value}'
+            )
+            setattr(
+                gpio_msg,
+                gpio_pin.value.lower(),
+                pin_value
+            )
 
         self._gpio_pub.publish(gpio_msg)
 
