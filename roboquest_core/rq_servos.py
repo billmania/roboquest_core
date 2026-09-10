@@ -3,14 +3,12 @@ from threading import Event, Lock, Thread
 from time import sleep, time
 from typing import List, Union
 
-import RPi.GPIO as GPIO
-
+from roboquest_core.rq_gpio_utils import RQ_GPIO, set_pin
 from roboquest_core.rq_i2c import BusError, DeviceError
 from roboquest_core.rq_i2c import RQI2CComms
 from roboquest_core.rq_servos_config import SERVO_QTY, Servo
 from roboquest_core.rq_servos_config import servo_map_and_state
 
-SERVO_ENABLE_PIN = 23
 #
 # This constant is only a default and can be overridden by i2c.yaml.
 #
@@ -128,13 +126,9 @@ class RQServos(object):
     def _setup_gpio(self) -> None:
         """Initialize the GPIO subsystem.
 
-        Initialize the GPIO subsystem. This class does not have exclusive
-        control of the GPIO subsystem.
+        Initialize the GPIO pin used by the servo sub-system.
         """
-        GPIO.setwarnings(False)
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(SERVO_ENABLE_PIN, GPIO.OUT)
-        GPIO.output(SERVO_ENABLE_PIN, GPIO.LOW)
+        set_pin(RQ_GPIO['SERVO_ENABLE'], 'low')
 
     def _setup_i2c(self) -> None:
         """Initialize use of the I2C bus."""
@@ -514,14 +508,14 @@ class RQServos(object):
         Enable or disable power to the servo controller.
         """
         if (enable and not self._controller_powered):
-            GPIO.output(SERVO_ENABLE_PIN, GPIO.HIGH)
+            set_pin(RQ_GPIO['SERVO_ENABLE'], 'high')
             sleep(INIT_DELAY_S)
             self._pca9685_init()
             self._controller_powered = True
 
         if (not enable and self._controller_powered):
             self._controller_powered = False
-            GPIO.output(SERVO_ENABLE_PIN, GPIO.LOW)
+            set_pin(RQ_GPIO['SERVO_ENABLE'], 'low')
 
     def _constrain(self, min_value: int, value: int, max_value: int) -> int:
         """Clip value to be between min and max, inclusive."""

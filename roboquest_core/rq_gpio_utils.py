@@ -2,6 +2,8 @@
 
 Utility functions and constants for manipulating and
 monitoring GPIO pins.
+This modules subsumed the functionality of the rq_gpio_user.py
+module.
 """
 
 import threading
@@ -16,7 +18,7 @@ from gpiod.line import Bias, Direction, Edge, Value
 
 
 GPIO_DEVICE = '/dev/gpiochip0'
-VERSION = 1
+VERSION = 2
 
 detector = None
 
@@ -34,6 +36,7 @@ class RQ_GPIO(Enum):
     CHARGE_BATTERY = 'GPIO21'
     CHARGER_POWERED = 'GPIO7'
     MOTOR_ENABLE = 'GPIO17'
+    SERVO_ENABLE = 'GPIO23'
     SHUTDOWN = 'GPIO27'
     UGPIO6 = 'GPIO6'
     UGPIO16 = 'GPIO16'
