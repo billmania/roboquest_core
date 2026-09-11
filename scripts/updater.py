@@ -22,7 +22,7 @@ import json
 import logging
 import os
 from pathlib import Path, PurePath
-from signal import SIGHUP, SIGINT, SIGTERM, SIG_IGN, signal
+from signal import SIGHUP, SIGINT, SIGTERM, SIG_IGN, Signals, signal
 from socket import AF_INET, SOCK_DGRAM, socket
 from sys import exit
 from time import sleep
@@ -36,7 +36,7 @@ from rq_gpio_utils import GPIOEdgeDetector, RQ_GPIO
 
 from rq_hat import RQHAT
 
-VERSION = '22'
+VERSION = '22.1'
 HAT_SERIAL = '/dev/ttyAMA3'
 SERIAL_NUMBER_FILE = '/sys/firmware/devicetree/base/serial-number'
 RQ_CORE_PERSIST = (
@@ -52,7 +52,7 @@ UPDATER_DIR = '/opt/updater'
 DIRECTORIES = [OS_PERSIST_DIR, UPDATER_DIR]
 CONFIG_FILES = ['configuration.json']
 UPDATE_LOG = UPDATER_DIR + '/updater.log'
-LOG_SERVER_PID_FILE = UPDATER_DIR + '/log_server_pid'
+LOG_SERVER_PID_FILE = '/tmp' + '/log_server_pid'
 LOG_SERVER_PORT = 8444
 LOG_LINES = 100
 UPDATE_IN_PROGRESS = UPDATER_DIR + '/update_in_progress'
@@ -69,7 +69,7 @@ CERT_FILE = 'cert.pem'
 KEY_FILE = 'key.pem'
 LOOP_PERIOD_S = 3.0
 GET_TIMEOUT_S = 9.0
-LONG_TIME = 60
+LONG_TIME = 20.0
 EOL = '\n'
 NULL_CHAR = '\0'
 
@@ -1050,14 +1050,14 @@ class RQUpdate(object):
             else:
                 sleep(LOOP_PERIOD_S)
 
-    def _signal_shutdown_cb(self, signal: int) -> None:
+    def _signal_shutdown_cb(self, signal: int, stack_frame) -> None:
         """Shutdown the robot by OS signal.
 
         The signal can come from the command line or from
         systemctl. In either case, some other process is
         responsible for the actual shutdown of the OS.
         """
-        logging.info(f'Shutdown by signal {signal}')
+        logging.info(f'Shutdown by signal {Signals(signal).name}')
         self._shutdown_cleanup(with_halt=False)
 
     def _button_shutdown_cb(self, gpio_event) -> None:
@@ -1068,6 +1068,7 @@ class RQUpdate(object):
     def _command_shutdown(self) -> None:
         """Shutdown the robot by GUI command."""
         logging.info('Shutdown by GUI command')
+        self._status_msg('Shutdown triggered')
         self._shutdown_cleanup(with_halt=True)
 
     def _reboot(self, arg):
@@ -1078,12 +1079,7 @@ class RQUpdate(object):
         Path(LOG_SERVER_PID_FILE).unlink(missing_ok=True)
         os.system('systemctl reboot')
 
-        #
-        # Pause here for a bit, so updater.py doesn't try
-        # to restart the containers after the OS is trying
-        # to stop the docker daemon.
-        #
-        sleep(LONG_TIME)
+        exit(0)
 
     def _remove_old_images(self):
         """
@@ -1125,6 +1121,7 @@ class RQUpdate(object):
             os.system('systemctl halt')
 
         sleep(LONG_TIME)
+        exit(0)
 
 
 if __name__ == '__main__':
