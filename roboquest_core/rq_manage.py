@@ -40,10 +40,11 @@ from rq_msgs.msg import MotorSpeed
 from rq_msgs.msg import Servos
 from rq_msgs.msg import Telemetry
 from rq_msgs.srv import Control
+from rq_msgs.srv import RunUserScript
 
 from std_srvs.srv import Empty
 
-VERSION = '26rc2'
+VERSION = '26rc3'
 
 MODULE_DIR = (
     '/usr/src/ros2ws'
@@ -293,6 +294,31 @@ class RQManage(RQNode):
         self._exit_timer.start()
         return response
 
+    def _run_user_script_cb(self, request, response):
+        """Handle a run_user_script request.
+
+        Implement the run_user_script service. Valid values
+        for the request script_name attribute are a string
+        which corresponds to an executable file in the X
+        directory.
+
+        If the script exists and is executable, it will be
+        executed in a separate thread. The service call will
+        return 0 without waiting for the script to finish.
+
+        If the script doesn't exist, the return_code will be 1.
+        If the script isn't executable, the return_code will
+        be 2.
+        If anything else runs amok, 3 is returned.
+        """
+        # TODO: Implement _run_user_script_cb
+        self.get_logger().warning(
+            '_run_user_script() not implemented'
+            f' script_name: {request.script_name}'
+        )
+        response.return_code = 3
+        return response
+
     def _control_cb(self, request, response):
         """Handle a control command.
 
@@ -370,6 +396,9 @@ class RQManage(RQNode):
         self._control_srv = self.create_service(Control,
                                                 'control_hat',
                                                 self._control_cb)
+        self._run_user_script_srv = self.create_service(RunUserScript,
+                                                'run_user_script',
+                                                self._run_user_script_cb)
         self._restart_srv = self.create_service(Empty,
                                                 'restart',
                                                 self._restart_cb)
