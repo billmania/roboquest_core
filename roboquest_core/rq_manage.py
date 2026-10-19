@@ -346,6 +346,10 @@ class RQManage(RQNode):
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,
+                    user=1000,
+                    group=1000,
+                    extra_groups=[],
+                    close_fds=True, 
                     cwd=SCRIPT_DIR
                 )
                 self._scripts.append(p)
