@@ -3,7 +3,10 @@
 Control the features of the HAT, provide the ROS services and topics.
 """
 
+import subprocess
+import sys
 from os import getpid, kill
+from pathlib import Path
 from signal import SIGKILL
 from threading import Timer
 from typing import List
@@ -46,10 +49,17 @@ from std_srvs.srv import Empty
 
 VERSION = '26rc3'
 
-MODULE_DIR = (
+PERSIST_DIR = (
     '/usr/src/ros2ws'
     '/install/roboquest_core/share/roboquest_core/persist'
-    '/i2c'
+)
+MODULE_DIR = (
+    PERSIST_DIR
+    + '/i2c'
+)
+SCRIPT_DIR = (
+    PERSIST_DIR
+    + '/scripts'
 )
 
 
@@ -93,6 +103,8 @@ class RQManage(RQNode):
         self._sentence_errors = 0
 
         self._previous_screen = 0
+
+        self._scripts: list[subprocess.Popen] = []
 
         self._setup_ros_graph()
 
@@ -294,12 +306,27 @@ class RQManage(RQNode):
         self._exit_timer.start()
         return response
 
-    def _run_user_script_cb(self, request, response):
+    def _reap_scripts(self):
+        """Remove finished script processes."""
+        for p in self._scripts:
+            return_code = p.poll()
+            if return_code is not None:
+                self._scripts.remove(p)
+                if return_code == 0:
+                    self.get_logger().info(
+                        f'User script returned {return_code}'
+                    )
+                else:
+                    self.get_logger().warning(
+                        f'User script returned {return_code}'
+                    )
+
+    def _run_user_script_cb(self, request: RunUserScript, response):
         """Handle a run_user_script request.
 
         Implement the run_user_script service. Valid values
-        for the request script_name attribute are a string
-        which corresponds to an executable file in the X
+        for the request.script_name attribute are a string
+        which corresponds to a Python script in the SCRIPT_DIR
         directory.
 
         If the script exists and is executable, it will be
@@ -307,16 +334,45 @@ class RQManage(RQNode):
         return 0 without waiting for the script to finish.
 
         If the script doesn't exist, the return_code will be 1.
-        If the script isn't executable, the return_code will
-        be 2.
+        If some other OS error occurs, return 2.
         If anything else runs amok, 3 is returned.
         """
-        # TODO: Implement _run_user_script_cb
-        self.get_logger().warning(
-            '_run_user_script() not implemented'
-            f' script_name: {request.script_name}'
-        )
-        response.return_code = 3
+        script_path = SCRIPT_DIR + '/' + request.script_name
+        if Path(script_path).exists():
+            try:
+                p = subprocess.Popen(
+                    [sys.executable, script_path],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                    cwd=SCRIPT_DIR
+                )
+                self._scripts.append(p)
+                response.return_code = 0
+                self.get_logger().info(
+                    f'User script {request.script_name} started'
+                )
+
+            except OSError as e:
+                self.get_logger().warning(
+                    f'User script {request.script_name} OSError exception'
+                    f' {e}'
+                )
+                response.return_code = 2
+
+            except subprocess.SubprocessError as e:
+                self.get_logger().warning(
+                    f'User script {request.script_name}'
+                    f' SubprocessError exception {e}'
+                )
+                response.return_code = 3
+
+        else:
+            self.get_logger().warning(
+                f'User script {request.script_name} does not exist'
+            )
+
         return response
 
     def _control_cb(self, request, response):
@@ -385,23 +441,33 @@ class RQManage(RQNode):
             if servo.find('servo') == 0:
                 self._servo_list.append(servo)
 
-        self._servo_sub = self.create_subscription(Servos,
-                                                   'servos',
-                                                   self._servo_cb,
-                                                   1)
-        self._gpio_sub = self.create_subscription(GPIOOutput,
-                                                  'gpio_output',
-                                                  self._gpio_output_cb,
-                                                  1)
-        self._control_srv = self.create_service(Control,
-                                                'control_hat',
-                                                self._control_cb)
-        self._run_user_script_srv = self.create_service(RunUserScript,
-                                                'run_user_script',
-                                                self._run_user_script_cb)
-        self._restart_srv = self.create_service(Empty,
-                                                'restart',
-                                                self._restart_cb)
+        self._servo_sub = self.create_subscription(
+            Servos,
+            'servos',
+            self._servo_cb,
+            1
+        )
+        self._gpio_sub = self.create_subscription(
+            GPIOOutput,
+            'gpio_output',
+            self._gpio_output_cb,
+            1
+        )
+        self._control_srv = self.create_service(
+            Control,
+            'control_hat',
+            self._control_cb
+        )
+        self._run_user_script_srv = self.create_service(
+            RunUserScript,
+            'run_user_script',
+            self._run_user_script_cb
+        )
+        self._restart_srv = self.create_service(
+            Empty,
+            'restart',
+            self._restart_cb
+        )
 
     def _setup_parameters(self):
         parameter_declarations = [
@@ -564,6 +630,7 @@ class RQManage(RQNode):
             ROSspin_once(node=self, timeout_sec=0)
             sentence = self._hat.read_sentence()
             ROSspin_once(node=self, timeout_sec=0)
+            self._reap_scripts()
 
             if sentence:
                 self._process_sentence(sentence)
