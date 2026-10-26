@@ -349,7 +349,7 @@ class RQManage(RQNode):
                     user=1000,
                     group=1000,
                     extra_groups=[],
-                    close_fds=True, 
+                    close_fds=True,
                     cwd=SCRIPT_DIR
                 )
                 self._scripts.append(p)
