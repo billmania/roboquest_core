@@ -6,6 +6,8 @@ more complex node. It gives examples of integration with
 the Roboquest application.
 """
 
+from rcl_interfaces.msg import SetParametersResult
+
 import rclpy
 from rclpy.node import Node
 
@@ -34,6 +36,9 @@ class ExampleComplex(Node):
             f'{node_name}, the complex example node, has started'
         )
 
+        self._parameters = {}
+        self._setup_parameters()
+
         self._trigger_srv = self.create_service(
             Trigger,
             'servo_trigger',
@@ -41,6 +46,70 @@ class ExampleComplex(Node):
         )
 
         self._setup_servo_power()
+
+    def _params_cb(self, updated_parameters) -> SetParametersResult:
+        """Process parameter updates."""
+        success = True
+
+        for parameter in updated_parameters:
+            try:
+                self._parameters[parameter.name] = parameter
+                self._log.info(
+                    f'Updated parameter {parameter.name}'
+                    f' to {self._parameters[parameter.name].value}'
+                )
+
+            except Exception as e:
+                self._log.warning(
+                    f'Failed to update parameter {parameter.name}'
+                    f' Exception: {e}'
+                )
+                success = False
+
+        if success:
+            return SetParametersResult(successful=True)
+        else:
+            return SetParametersResult(successful=False)
+
+    def _setup_parameters(self):
+        """Get the parameters.
+
+        Declare all of the parameters, retrieve any provided, and
+        update the parameters dictionary.
+        """
+        declarations = [
+            ('servo0', [0, 0]),
+            ('servo1', [1, 90]),
+            ('servo2', [0, 0]),
+            ('servo3', [1, 80]),
+            ('servo4', [0, 0]),
+            ('servo5', [1, 70]),
+            ('servo6', [0, 0]),
+            ('servo7', [1, 60]),
+            ('servo8', [0, 0]),
+            ('servo9', [0, 0]),
+            ('servo10', [0, 0]),
+            ('servo11', [0, 0]),
+            ('servo12', [0, 0]),
+            ('servo13', [0, 0]),
+            ('servo14', [0, 0]),
+            ('servo15', [0, 0])
+        ]
+
+        for declaration in declarations:
+            param_name = declaration[0]
+            param_value = declaration[1]
+            self.declare_parameter(
+                param_name,
+                param_value
+            )
+            self._parameters[param_name] = self.get_parameter(param_name)
+            self._log.info(
+                f'Parameter {param_name}'
+                f' = {self._parameters[param_name].value}'
+            )
+
+        self.add_on_set_parameters_callback(self._params_cb)
 
     def _setup_servo_power(self):
         """Create the servo power client."""
@@ -129,6 +198,10 @@ class ExampleComplex(Node):
         Power the servos.
         """
         self._set_servo_power('ON')
+        self._log.info(
+            f'Parameter servo5'
+            f" = {self._parameters['servo5'].value}"
+        )
 
 
 def main(args=None):
