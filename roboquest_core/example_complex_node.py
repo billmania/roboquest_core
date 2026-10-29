@@ -18,9 +18,38 @@ from rcl_interfaces.msg import SetParametersResult
 import rclpy
 from rclpy.node import Node
 
+from rq_msgs.msg import Servos
 from rq_msgs.srv import Control
 
 from std_srvs.srv import Trigger
+
+#
+# Set the first member of the list to 0 to ignore the servo. Set
+# it to SET_ANGLE to set the ANGLE of the servo.
+# When the first member is SET_ANGLE, the second is then interpreted as
+# a degree angle position in the range [0, 359].
+#
+SERVO_PARAMS = {
+    'servo0': [0, 0],
+    'servo1': [0, 0],
+    'servo2': [0, 0],
+    'servo3': [1, 20],
+    'servo4': [0, 0],
+    'servo5': [1, 20],
+    'servo6': [0, 0],
+    'servo7': [1, 20],
+    'servo8': [0, 0],
+    'servo9': [0, 0],
+    'servo10': [0, 0],
+    'servo11': [0, 0],
+    'servo12': [0, 0],
+    'servo13': [0, 0],
+    'servo14': [0, 0],
+    'servo15': [0, 0]
+}
+SET_ANGLE = 1
+COMMAND = 0
+ANGLE = 1
 
 
 class ExampleComplex(Node):
@@ -53,6 +82,11 @@ class ExampleComplex(Node):
         self._trigger_status_pub = self.create_publisher(
             GoalStatus,
             'servo_trigger_status',
+            1
+        )
+        self._servos_pub = self.create_publisher(
+            Servos,
+            'servos',
             1
         )
         self._trigger_srv = self.create_service(
@@ -93,37 +127,18 @@ class ExampleComplex(Node):
         Declare all of the parameters, retrieve any provided, and
         update the parameters dictionary.
         """
-        declarations = [
-            ('servo0', [0, 0]),
-            ('servo1', [1, 90]),
-            ('servo2', [0, 0]),
-            ('servo3', [1, 80]),
-            ('servo4', [0, 0]),
-            ('servo5', [1, 70]),
-            ('servo6', [0, 0]),
-            ('servo7', [1, 60]),
-            ('servo8', [0, 0]),
-            ('servo9', [0, 0]),
-            ('servo10', [0, 0]),
-            ('servo11', [0, 0]),
-            ('servo12', [0, 0]),
-            ('servo13', [0, 0]),
-            ('servo14', [0, 0]),
-            ('servo15', [0, 0])
-        ]
         self._parameters = {}
 
-        for declaration in declarations:
-            param_name = declaration[0]
-            param_value = declaration[1]
+        for servo_name in SERVO_PARAMS:
+            param_value = SERVO_PARAMS[servo_name]
             self.declare_parameter(
-                param_name,
+                servo_name,
                 param_value
             )
-            self._parameters[param_name] = self.get_parameter(param_name)
+            self._parameters[servo_name] = self.get_parameter(servo_name)
             self._log.info(
-                f'Parameter {param_name}'
-                f' = {self._parameters[param_name].value}'
+                f'Parameter {servo_name}'
+                f' = {self._parameters[servo_name].value}'
             )
 
         self.add_on_set_parameters_callback(self._params_cb)
@@ -145,22 +160,25 @@ class ExampleComplex(Node):
                 executor=None,
                 timeout_sec=0.0
             )
-        self._log.info(
-            'Servo power control service available'
-        )
+        self._set_servo_power('ON')
 
     def _set_servo_power(self, servos_state: str = 'OFF'):
         """Set the state of the servo power."""
-        if self._servo_power_future:
+        while self._servo_power_future:
             #
             # Still waiting for a previous call to complete.
             #
             self._log.warning(
-                f'_set_servo_power({servos_state})'
-                ' waiting for previous call to complete'
+                (
+                    f'_set_servo_power({servos_state})'
+                    ' waiting for previous call to complete'
+                ),
+                throttle_duration_sec=5.0
             )
-            return
 
+        self._log.info(
+            f'Setting servo power to {servos_state}'
+        )
         request = Control.Request()
         request.set_servos = servos_state
         self._servo_power_future = self._servo_power_client.call_async(
@@ -203,16 +221,18 @@ class ExampleComplex(Node):
         self._log.info(
             'Servo control triggered'
         )
-        self._run_servo_logic()
+        self._set_servo_positions()
 
         response.success = True
-        response.message = 'Power controlled'
+        response.message = 'Servo control completed'
         return response
 
-    def _run_servo_logic(self):
-        """Run the servo logic.
+    def _set_servo_positions(self):
+        """Set the position for each servo.
 
-        Power the servos.
+        Power the servos and then use the parameters to determine which
+        servo to position. Publish a status message before and after
+        positioning the servoes.
         """
         servo_trigger_status = GoalStatus()
 
@@ -221,15 +241,37 @@ class ExampleComplex(Node):
         servo_trigger_status.text = f'{self._sequence_number} Received'
         self._trigger_status_pub.publish(servo_trigger_status)
 
-        self._set_servo_power('ON')
-        self._log.info(
-            f'Parameter servo5'
-            f" = {self._parameters['servo5'].value}"
-        )
+        status_msg = 'no exception'
+        servos = Servos()
+        servos.header.stamp = self.get_clock().now().to_msg()
+
+        for servo_name in SERVO_PARAMS:
+            if self._parameters[servo_name].value[COMMAND] != SET_ANGLE:
+                continue
+
+            try:
+                servo_object = getattr(servos, servo_name)
+                setattr(
+                    servo_object,
+                    'command_type',
+                    self._parameters[servo_name].value[COMMAND]
+                )
+                setattr(
+                    servo_object,
+                    'angle_deg',
+                    self._parameters[servo_name].value[ANGLE]
+                )
+
+            except Exception:
+                status_msg = 'exception'
+
+        self._servos_pub.publish(servos)
 
         servo_trigger_status.goal_id.stamp = self.get_clock().now().to_msg()
         servo_trigger_status.status = GoalStatus.SUCCEEDED
-        servo_trigger_status.text = f'{self._sequence_number} Completed'
+        servo_trigger_status.text = (
+            f'{self._sequence_number} Completed with {status_msg}'
+        )
         self._trigger_status_pub.publish(servo_trigger_status)
 
         self._sequence_number += 1
