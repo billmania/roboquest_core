@@ -6,6 +6,13 @@ more complex node. It gives examples of integration with
 the Roboquest application.
 """
 
+#
+# This node doesn't implement any ROS actions, but
+# GoalStatus is most appropriate, existing interface
+# to provide feedback about the /servo_trigger service.
+#
+from actionlib_msgs.msg import GoalStatus
+
 from rcl_interfaces.msg import SetParametersResult
 
 import rclpy
@@ -23,7 +30,11 @@ class ExampleComplex(Node):
     """
 
     def __init__(self, node_name: str):
-        """Create the publisher and the timer."""
+        """Establish the facilities.
+
+        Create the publishers, services, and service clients. Declare
+        the parameters. Initialize the counters.
+        """
         super().__init__(node_name)
 
         rclpy.logging.set_logger_level(
@@ -36,9 +47,14 @@ class ExampleComplex(Node):
             f'{node_name}, the complex example node, has started'
         )
 
-        self._parameters = {}
         self._setup_parameters()
 
+        self._sequence_number = 0
+        self._trigger_status_pub = self.create_publisher(
+            GoalStatus,
+            'servo_trigger_status',
+            1
+        )
         self._trigger_srv = self.create_service(
             Trigger,
             'servo_trigger',
@@ -95,6 +111,7 @@ class ExampleComplex(Node):
             ('servo14', [0, 0]),
             ('servo15', [0, 0])
         ]
+        self._parameters = {}
 
         for declaration in declarations:
             param_name = declaration[0]
@@ -197,11 +214,25 @@ class ExampleComplex(Node):
 
         Power the servos.
         """
+        servo_trigger_status = GoalStatus()
+
+        servo_trigger_status.goal_id.stamp = self.get_clock().now().to_msg()
+        servo_trigger_status.status = GoalStatus.ACTIVE
+        servo_trigger_status.text = f'{self._sequence_number} Received'
+        self._trigger_status_pub.publish(servo_trigger_status)
+
         self._set_servo_power('ON')
         self._log.info(
             f'Parameter servo5'
             f" = {self._parameters['servo5'].value}"
         )
+
+        servo_trigger_status.goal_id.stamp = self.get_clock().now().to_msg()
+        servo_trigger_status.status = GoalStatus.SUCCEEDED
+        servo_trigger_status.text = f'{self._sequence_number} Completed'
+        self._trigger_status_pub.publish(servo_trigger_status)
+
+        self._sequence_number += 1
 
 
 def main(args=None):
